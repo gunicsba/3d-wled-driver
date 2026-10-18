@@ -1,0 +1,8 @@
+src/secrets.h
+scripts/config_local.py
+scripts/gui_state.json
+maridata/
+.pio/
+.vscode/
+__pycache__/
+*.pyc
