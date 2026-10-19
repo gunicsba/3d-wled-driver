@@ -16,6 +16,8 @@ import copy
 import csv
 import importlib
 import json
+import logging
+import logging.handlers
 import math
 import os
 import queue
@@ -35,6 +37,18 @@ import config
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 STATE_FILE = os.path.join(HERE, "gui_state.json")
+LOG_FILE = os.path.join(HERE, "gui.log")
+log = logging.getLogger("xmas")
+
+
+def setup_logging():
+    """Writes what the app does to scripts/gui.log (git-ignored, two files of 1 MB at most)."""
+    handler = logging.handlers.RotatingFileHandler(LOG_FILE, maxBytes=1_000_000, backupCount=1, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)-7s %(threadName)-10s %(message)s", "%H:%M:%S"))
+    log.addHandler(handler)
+    log.setLevel(logging.INFO)
+    threading.excepthook = lambda a: log.error("thread %s crashed", a.thread.name if a.thread else "?",
+                                               exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "boom"), ("Laser swords", "swords"),
            ("Pac-Man", "pacman"), ("Spinning logo", "logo"), ("Dancing Santa", "santa"), ("Tractor", "tractor"),
            ("Rainbow", "rainbow"), ("Hungarian flag", "flag_hu"), ("Snowfall", "snow"), ("DVD shapes", "dvd"),
@@ -190,8 +204,19 @@ class Engine:
                tuple(view_from_globals(g)))
         if self._leds_cache[0] != key:
             path = g["map"] or common.newest_map()
-            self._leds_cache = (key, common.load_map(path, g["flip_v"], g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_x"],
-                                                   view_from_globals(g)))
+            try:
+                leds = common.load_map(path, g["flip_v"], g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_x"],
+                                       view_from_globals(g))
+            except BaseException as e:                        # SystemExit too: load_map explains problems that way
+                log.error("map %s did not load: %r", path, e)
+                raise
+            xs, ys = [l.xcm for l in leds], [l.ycm for l in leds]
+            log.info("map %s: %d LEDs (numbers %d..%d, module has %s), picture %.0f x %.0f cm, view %s", path, len(leds),
+                     min(l.i for l in leds), max(l.i for l in leds), g["leds"], max(xs) - min(xs), max(ys) - min(ys),
+                     view_from_globals(g))
+            if max(l.i for l in leds) >= g["leds"]:
+                log.warning("the map has LED numbers above the LED count (%s): those LEDs are never sent", g["leds"])
+            self._leds_cache = (key, leds)
         return self._leds_cache[1]
 
     def virtual_leds(self):
@@ -240,6 +265,7 @@ class Engine:
             inst = {"render": self.make_render(deck, self.real_leds(), ns, False), "version": deck.version,
                     "gver": self.gver, "t0": time.time()}
             self.insts[ident] = inst
+            log.info("deck %s built: %s", ident, deck.effect)
         return inst["render"](time.time() - inst["t0"])
 
     def live_frame(self):
@@ -270,6 +296,7 @@ class Engine:
     def live_loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         seq, next_tick, win_start, win_n = 0, time.perf_counter(), time.perf_counter(), 0
+        last_report, last_send_error = 0.0, 0.0
         while not self.stop:
             fps = max(5, min(100, float(self.g["fps"])))
             frame = None
@@ -278,6 +305,8 @@ class Engine:
                 self.last_frame = frame
                 self.live_error = ""
             except Exception as e:                          # a broken effect must not kill the stream
+                if self.live_error != f"{type(e).__name__}: {e}":
+                    log.error("live deck %s failed", self.live, exc_info=True)
                 self.live_error = f"{type(e).__name__}: {e}"
                 self.insts[self.live] = None
                 time.sleep(0.5)
@@ -287,12 +316,20 @@ class Engine:
                 seq = seq % 15 + 1
                 try:
                     common.send_frame(sock, self.g["host"], self.g["leds_per_module"], frame, seq)
-                except OSError:
-                    pass
+                except OSError as e:
+                    if time.time() - last_send_error > 10:
+                        log.error("sending to %s failed: %r", self.g["host"], e)
+                        last_send_error = time.time()
                 win_n += 1
             now = time.perf_counter()
             if now - win_start >= 1.0:
                 self.sent_fps, win_start, win_n = win_n, now, 0
+            if time.time() - last_report >= 5:
+                last_report = time.time()
+                lit = sum(1 for k in range(0, len(frame or b""), 3) if frame[k] or frame[k + 1] or frame[k + 2])
+                log.info("live %s: sending %s fps, frame %d LEDs, %d lit, brightest value %d, stream=%s blackout=%s error=%r",
+                         self.live, self.sent_fps, len(frame or b"") // 3, lit, max(frame or b"\0"), self.g["stream"],
+                         self.blackout, self.live_error)
             next_tick += 1 / fps
             delay = next_tick - time.perf_counter()
             if delay > 0:
@@ -336,6 +373,7 @@ class Module:
     def __init__(self, g):
         self.g, self.status, self.stop = g, None, False
         self.statuses = []                                  # one per module, None where it did not answer
+        self.last_summary, self.last_logged = None, 0.0
 
     def hosts(self):
         return common.parse_hosts(self.g["host"])
@@ -354,6 +392,10 @@ class Module:
                         statuses.append(json.load(r))
                 except Exception:
                     statuses.append(None)
+            summary = [(h, s and (s.get("leds"), s.get("live"), s.get("rt_fps"), s.get("show_fps"), s.get("mode"))) for h, s in zip(self.hosts(), statuses)]
+            if summary != self.last_summary or time.time() - self.last_logged > 30:
+                log.info("modules (host, (leds, live, rx fps, show fps, mode)): %s", summary)
+                self.last_summary, self.last_logged = summary, time.time()
             self.statuses = statuses
             self.status = next((s for s in statuses if s), None)      # the first module that answers
             time.sleep(1.0)
@@ -819,6 +861,7 @@ class App:
         style.map("TCheckbutton", background=[("active", PANEL)])
         style.configure("Big.TButton", font=("Segoe UI", 13, "bold"), padding=10)
         state = self.load_state()
+        self.root.report_callback_exception = lambda *exc: log.error("error in the window", exc_info=exc)
         self.g = default_globals()
         self.g.update(state.get("g", {}))
         self.effects = {name: Effect(label, name) for label, name in EFFECTS}
@@ -965,12 +1008,14 @@ class App:
     def set_g(self, key, value, rebuild=False):
         if self.g.get(key) == value:
             return
+        log.info("setting %s = %r", key, value)
         self.g[key] = value
         if rebuild:
             self.engine.gver += 1                           # decks rebuild with the new map / background
         self.save_later()
 
     def take_live(self):
+        log.info("take %s live", "B" if self.engine.live == "A" else "A")
         self.engine.switch()
 
     def toggle_blackout(self):
@@ -1054,4 +1099,6 @@ class App:
 
 
 if __name__ == "__main__":
+    setup_logging()
+    log.info("---- XMasTractor app starts (python %s) ----", sys.version.split()[0])
     App().run()

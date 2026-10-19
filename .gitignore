@@ -1,6 +1,7 @@
 src/secrets.h
 scripts/config_local.py
 scripts/gui_state.json
+scripts/gui.log*
 maridata/
 .pio/
 .vscode/
