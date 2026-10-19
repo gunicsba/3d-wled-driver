@@ -47,7 +47,8 @@ def build(leds, args):
     font = load_font(FONT_PX)
     text = args.text or " "
     cap = -font.getbbox("H", anchor="ls")[1]                # height of a capital
-    stroke = int(round(args.thickness * 0.16 * FONT_PX))    # extra thickness added all round every stroke
+    change = int(round((args.thickness - 0.2) * 0.2 * FONT_PX))   # 0.2 is the font as it is; more fattens, less thins
+    stroke, thin = max(change, 0), max(-change, 0)         # pixels added or taken off all round every stroke
     space = args.spacing * cap                              # extra room between letters
     base = int(FONT_PX * 1.3) + stroke
     advance = [font.getlength(ch) + space + 2 * stroke for ch in text]
@@ -58,7 +59,9 @@ def build(leds, args):
     for ch, step in zip(text, advance):                     # letter by letter, so the spacing can be set
         draw.text((x, base), ch, fill=255, font=font, anchor="ls", stroke_width=stroke, stroke_fill=255)
         x += step
-    cap += 2 * stroke                                       # the height of a capital, with its thickness
+    if thin:
+        image = image.filter(ImageFilter.MinFilter(2 * thin + 1))      # eat into the strokes
+    cap += 2 * stroke - 2 * thin                            # the height of a capital, with its thickness
     cm_per_px = args.size * height / cap                    # how big the letters are on the map
     image = image.filter(ImageFilter.GaussianBlur(max(0.5, 0.45 * pitch / cm_per_px)))   # a sparse LED still catches a stroke
     pix = image.load()
@@ -109,7 +112,7 @@ def main():
     ap.add_argument("--rainbow", action="store_true", help="colours that drift along the text")
     ap.add_argument("--size", type=float, default=0.5, help="height of the capital letters as a part of the picture height")
     ap.add_argument("--thickness", type=float, default=0.2,
-                    help="how thick the strokes of the letters are: 0 thin, 0.2 bold, 0.5 very fat (too fat and the letters fill up)")
+                    help="how thick the strokes of the letters are: 0 hairline, 0.2 the font as it is, 0.5 very fat (too fat and the letters fill up)")
     ap.add_argument("--spacing", type=float, default=0.15, help="extra space between the letters, as a part of their height")
     ap.add_argument("--y", type=float, default=0.5, help="where the text sits: 0 bottom, 1 top")
     ap.add_argument("--speed", type=float, default=0.25, help="picture widths per second")
