@@ -39,7 +39,7 @@ EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "b
            ("Pac-Man", "pacman"), ("Spinning logo", "logo"), ("Dancing Santa", "santa"), ("Tractor", "tractor"),
            ("Rainbow", "rainbow"), ("Hungarian flag", "flag_hu"), ("Snowfall", "snow"), ("DVD shapes", "dvd"),
            ("Tetris (keys)", "tetris"), ("Pong (keys)", "pong"), ("Music visualiser", "music")]
-GLOBAL_DESTS = {"host", "leds", "map", "fps", "skip_first", "skip_last", "min_y", "max_y", "flip_v", "flip_x", "background",
+GLOBAL_DESTS = {"host", "leds", "leds_per_module", "map", "fps", "skip_first", "skip_last", "min_y", "max_y", "flip_v", "flip_x", "background",
                 "bg_brightness", "duration", "list_devices",
                 "map_orient", "map_rotate_x", "map_rotate_y", "map_rotate_z", "view_azimuth", "view_elevation", "view_roll", "view_distance"}
 ORDERS = ["GRB", "RGB", "BRG", "RBG", "GBR", "BGR"]
@@ -52,7 +52,7 @@ KEYS = queue.Queue()                                   # key presses from the wi
 
 
 def default_globals():
-    return {"host": config.HOST, "leds": config.LEDS, "map": config.MAP or "", "fps": 30, "skip_first": config.SKIP_FIRST,
+    return {"host": config.HOST, "leds": config.LEDS, "leds_per_module": config.LEDS_PER_MODULE, "map": config.MAP or "", "fps": 30, "skip_first": config.SKIP_FIRST,
             "skip_last": config.SKIP_LAST, "min_y": config.MIN_Y, "max_y": config.MAX_Y, "flip_v": bool(config.FLIP_V), "flip_x": bool(config.FLIP_X),
             "background": config.BACKGROUND, "bg_brightness": config.BG_BRIGHTNESS, "preview_pitch": 2.5,
             "crossfade": 1.0, "stream": True,
@@ -170,6 +170,7 @@ class Engine:
                 setattr(ns, k, v)
         g = self.g
         ns.host, ns.leds, ns.map, ns.fps = g["host"], g["leds"], g["map"] or None, g["fps"]
+        ns.leds_per_module = g["leds_per_module"]
         ns.skip_first, ns.skip_last, ns.min_y, ns.max_y, ns.flip_v = g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_v"]
         ns.flip_x = g["flip_x"]
         ns.map_orient, ns.map_rotate_x, ns.map_rotate_y, ns.map_rotate_z = (
@@ -279,9 +280,8 @@ class Engine:
                 frame = bytearray(self.g["leds"] * 3)
             if frame is not None and self.g["stream"]:
                 seq = seq % 15 + 1
-                header = bytes((0x41, seq, 0x01, 0x01)) + (0).to_bytes(4, "big") + len(frame).to_bytes(2, "big")
                 try:
-                    sock.sendto(header + bytes(frame), (self.g["host"], 4048))
+                    common.send_frame(sock, self.g["host"], self.g["leds_per_module"], frame, seq)
                 except OSError:
                     pass
                 win_n += 1
@@ -330,27 +330,42 @@ class Engine:
 class Module:
     def __init__(self, g):
         self.g, self.status, self.stop = g, None, False
+        self.statuses = []                                  # one per module, None where it did not answer
 
-    def url(self, path, **params):
+    def hosts(self):
+        return common.parse_hosts(self.g["host"])
+
+    @staticmethod
+    def url(host, path, **params):
         q = ("?" + urllib.parse.urlencode(params)) if params else ""
-        return f"http://{self.g['host']}{path}{q}"
+        return f"http://{host}{path}{q}"
 
     def poll_loop(self):
         while not self.stop:
-            try:
-                with urllib.request.urlopen(self.url("/status"), timeout=2) as r:
-                    self.status = json.load(r)
-            except Exception:
-                self.status = None
+            statuses = []
+            for host in self.hosts():
+                try:
+                    with urllib.request.urlopen(self.url(host, "/status"), timeout=2) as r:
+                        statuses.append(json.load(r))
+                except Exception:
+                    statuses.append(None)
+            self.statuses = statuses
+            self.status = next((s for s in statuses if s), None)      # the first module that answers
             time.sleep(1.0)
 
     def call(self, path, **params):
-        def go():
+        """The same setting for every module."""
+        self.call_each(path, lambda k: params)
+
+    def call_each(self, path, params_for):
+        """params_for(k) gives the settings for the k-th module."""
+        def go(host, params):
             try:
-                urllib.request.urlopen(self.url(path, **params), timeout=4).read()
+                urllib.request.urlopen(self.url(host, path, **params), timeout=4).read()
             except Exception:
                 pass
-        threading.Thread(target=go, daemon=True).start()
+        for k, host in enumerate(self.hosts()):
+            threading.Thread(target=go, args=(host, params_for(k)), daemon=True).start()
 
 
 # ---------------------------------------------------------------- the window
@@ -704,7 +719,8 @@ class App:
         self.black_btn = ttk.Button(mid, text="Blackout", command=self.toggle_blackout)
         self.black_btn.pack(fill="x", padx=10, pady=6)
         self.section(mid, "ESP32 module")
-        self.entry_row(mid, "Address", "host", str, live=True)
+        self.entry_row(mid, "Address(es)", "host", str, live=True)
+        self.entry_row(mid, "Most LEDs per module", "leds_per_module", int, live=True)
         tk.Label(mid, text="Brightness", bg=PANEL, fg=FG, font=("Segoe UI", 9)).pack(anchor="w", padx=12)
         self.bri = tk.IntVar(value=80)
         scale = ttk.Scale(mid, from_=1, to=255, variable=self.bri)
@@ -719,7 +735,7 @@ class App:
                         command=lambda: self.module.call("/set", skipboot=int(self.skipboot.get()))).pack(anchor="w", padx=12, pady=4)
         row = tk.Frame(mid, bg=PANEL)
         row.pack(fill="x", padx=12)
-        tk.Label(row, text="LEDs on module", bg=PANEL, fg=FG, font=("Segoe UI", 9)).pack(side="left")
+        tk.Label(row, text="LEDs in total", bg=PANEL, fg=FG, font=("Segoe UI", 9)).pack(side="left")
         self.led_count = tk.StringVar(value=str(self.g["leds"]))
         ttk.Entry(row, textvariable=self.led_count, width=6).pack(side="left", padx=6)
         ttk.Button(row, text="Apply", width=6, command=self.apply_leds).pack(side="left")
@@ -794,7 +810,8 @@ class App:
         except ValueError:
             return
         self.set_g("leds", n, rebuild=True)
-        self.module.call("/config", leds=n)
+        counts = common.module_leds(n, self.g["leds_per_module"], len(self.module.hosts()))
+        self.module.call_each("/config", lambda k: {"leds": counts[k]})
 
     def on_key(self, event):
         if isinstance(event.widget, (tk.Entry, ttk.Entry, ttk.Spinbox, ttk.Combobox, tk.Text)):
@@ -820,6 +837,13 @@ class App:
                 self.order.set(st.get("order", "GRB"))
                 self.skipboot.set(bool(st.get("skipboot")))
             net = f"{st.get('wifi', '')} {st.get('rssi', '')} dBm" if "rssi" in st else ""
+            answered = [s for s in self.module.statuses if s]
+            if len(self.module.statuses) > 1 and answered:
+                st = dict(st, name=f"{len(answered)} of {len(self.module.statuses)} modules answering",
+                          rt_fps=min(s.get("rt_fps", 0) for s in answered),
+                          show_fps=min(s.get("show_fps", 0) for s in answered),
+                          rt_gap_ms=max(s.get("rt_gap_ms", 0) for s in answered),
+                          sta_drops=sum(s.get("sta_drops", 0) for s in answered))
             self.status.configure(fg=FG, text=f"{st.get('name', 'module')}  |  sending {self.engine.sent_fps} fps  |  module got {st.get('rt_fps', 0)} fps, "
                                               f"shows {st.get('show_fps', 0)}, longest gap {st.get('rt_gap_ms', 0)} ms  |  {net}  "
                                               f"|  up {st.get('uptime_s', 0) // 60} min, wifi drops {st.get('sta_drops', 0)}")

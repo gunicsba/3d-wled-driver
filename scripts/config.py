@@ -4,8 +4,10 @@ Put your own values in scripts/config_local.py (copy config_local.example.py): i
 so your IP address and map tweaks stay out of the repository.
 """
 
-HOST = "192.168.4.1"     # the module: 192.168.4.1 when you are on its own access point, or its IP on your WiFi
-LEDS = 200               # LED count on the module
+HOST = "192.168.4.1"     # the module: 192.168.4.1 when you are on its own access point, or its IP on your WiFi.
+                         # Several modules: "192.168.1.50,192.168.1.51,192.168.1.52" (LEDs 0-999 on the first, and so on)
+LEDS = 200               # LED count in total (over all modules)
+LEDS_PER_MODULE = 1000   # most LEDs one module drives; a longer string is split over the modules in HOST
 MAP = None               # None = newest curtain map in maridata/ (or maps/ if there is none), else a path
 FPS = 30
 

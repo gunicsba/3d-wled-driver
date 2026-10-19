@@ -104,10 +104,22 @@ Defaults are in `scripts/config.py`. Put your own values in `scripts/config_loca
 | Setting | Meaning |
 |---|---|
 | `HOST` | The module's address: `192.168.4.1` when you are on its own access point, or its IP on your WiFi |
-| `LEDS` | LED count on the module |
+| `LEDS` | LED count in total, over all modules |
+| `LEDS_PER_MODULE` | Most LEDs one module drives (1000) |
 | `SKIP_FIRST`, `SKIP_LAST` | Leave the first or last LEDs dark (they are also left out of the picture's size) |
 | `FLIP_X`, `FLIP_V` | Mirror left-right or up-down, for a map that came out the wrong way round |
 | `BACKGROUND`, `BG_BRIGHTNESS` | The colour and brightness of LEDs an effect leaves unlit |
+
+## Many LEDs: more than one module
+
+One module drives up to 1000 LEDs (every LED takes 30 microseconds to send, so 1000 LEDs update about 30 times a second, and `fps` of 30 is the most to ask for). For a longer string use more modules: give `HOST` a comma separated list in the order of the string, and `LEDS` the total.
+
+```
+HOST = "192.168.1.50,192.168.1.51,192.168.1.52"
+LEDS = 3000
+```
+
+LEDs 0-999 go to the first module, 1000-1999 to the second and so on; each module is set to its own count and numbers its LEDs from 0. The app (address field, brightness, colour order, LED count) and `watch.py` talk to all of them, and the command line has `--host a,b,c` and `--leds-per-module`. Map the LEDs of every module as one string (the numbers continue across modules), or one module at a time. Frames are sent in packets of at most 480 LEDs, so a module of any size works over WiFi.
 
 ## Tips
 

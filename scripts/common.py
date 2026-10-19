@@ -185,8 +185,11 @@ def parser(description):
     """ArgumentParser with the common flags; defaults come from config.py."""
     ap = argparse.ArgumentParser(description=description,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--host", default=config.HOST)
-    ap.add_argument("--leds", type=int, default=config.LEDS, help="LED count on the module")
+    ap.add_argument("--host", default=config.HOST,
+                    help="module address; for several modules a comma separated list, in the order of the LEDs")
+    ap.add_argument("--leds", type=int, default=config.LEDS, help="LED count in total (over all modules)")
+    ap.add_argument("--leds-per-module", type=int, default=config.LEDS_PER_MODULE,
+                    help="LEDs each module drives (the string is split over the hosts in this many)")
     ap.add_argument("--map", default=config.MAP, help="map CSV (default: newest curtain map)")
     ap.add_argument("--fps", type=float, default=config.FPS)
     ap.add_argument("--skip-first", type=int, default=config.SKIP_FIRST, help="leave the first N LEDs dark")
@@ -225,7 +228,60 @@ def leds_from_args(args):
     leds = load_map(path, args.flip_v, args.skip_first, args.skip_last, args.min_y, args.max_y, args.flip_x,
                     view_from_args(args))
     print(f"{len(leds)} LEDs from {os.path.basename(path)} -> {args.host}:4048, Ctrl+C to stop")
+    check_modules(args.host, args.leds, args.leds_per_module)
     return leds
+
+
+# One DDP packet carries at most this many LEDs: 480 LEDs are 1440 bytes, and with its 10 byte header the packet
+# still fits in one WiFi packet (1472 bytes). A bigger packet gets split into fragments on the way, which the
+# module drops, so a frame of more than about 487 LEDs would never arrive.
+DDP_MAX_PIXELS = 480
+
+
+def ddp_packets(frame, seq):
+    """A frame of RGB bytes as DDP packets, each holding up to DDP_MAX_PIXELS LEDs at its own offset.
+
+    Only the last packet carries the PUSH flag, which tells the module the frame is complete and can be shown.
+    """
+    step = DDP_MAX_PIXELS * 3
+    for offset in range(0, max(len(frame), 1), step):
+        data = bytes(frame[offset:offset + step])
+        flags = 0x41 if offset + step >= len(frame) else 0x40            # version 1, plus PUSH on the last packet
+        yield bytes((flags, seq, 0x01, 0x01)) + offset.to_bytes(4, "big") + len(data).to_bytes(2, "big") + data
+
+
+def parse_hosts(spec):
+    """"a,b,c" (or a list) as a list of addresses."""
+    items = spec.split(",") if isinstance(spec, str) else spec
+    return [h.strip() for h in items if h.strip()]
+
+
+def module_leds(total, per_module, count):
+    """How many LEDs each of `count` modules shows when `total` LEDs are filled module by module."""
+    return [max(0, min(per_module, total - k * per_module)) for k in range(count)]
+
+
+def check_modules(host_spec, total, per_module):
+    hosts = parse_hosts(host_spec)
+    if len(hosts) * per_module < total:
+        print(f"WARNING: {total} LEDs need {-(-total // per_module)} modules of {per_module} but only {len(hosts)} "
+              f"host(s) are listed: the last {total - len(hosts) * per_module} LEDs have nowhere to go")
+
+
+def send_frame(sock, host_spec, per_module, frame, seq):
+    """Sends the frame: with one host all of it, with several each module gets its own slice (LED numbers from 0)."""
+    hosts = parse_hosts(host_spec)
+    if len(hosts) == 1:
+        for packet in ddp_packets(frame, seq):
+            sock.sendto(packet, (hosts[0], 4048))
+        return
+    step = per_module * 3
+    for k, host in enumerate(hosts):
+        part = frame[k * step:(k + 1) * step]
+        if not part:
+            break
+        for packet in ddp_packets(part, seq):
+            sock.sendto(packet, (host, 4048))
 
 
 # Sender-side timing over the last full second (updated by run()): frames sent, longest wait between two
@@ -251,8 +307,7 @@ def run(args, render):
             frame = render(t)
             win_render = max(win_render, (time.perf_counter() - t_render) * 1000)
             seq = seq % 15 + 1
-            header = bytes((0x41, seq, 0x01, 0x01)) + (0).to_bytes(4, "big") + len(frame).to_bytes(2, "big")
-            sock.sendto(header + bytes(frame), (args.host, 4048))
+            send_frame(sock, args.host, args.leds_per_module, frame, seq)
             now = time.perf_counter()
             if last_send is not None:
                 win_gap = max(win_gap, (now - last_send) * 1000)
