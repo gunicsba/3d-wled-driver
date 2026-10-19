@@ -91,6 +91,7 @@ Every effect also runs on its own: `py scripts/snow.py`, `py scripts/tree.py`, a
 | Christmas tree | `tree.py` | A green tree with falling snow and twinkling coloured baubles |
 | Explosion | `boom.py` | A burning fuse along the strip, then a flash and a red shockwave ring |
 | Colliding lines | `collide.py` | Coloured comets rush in from all directions, meet in a flash and a ring of their colours, and shoot on out |
+| Running text | `marquee.py` | A message scrolls across (`--text`, colour or rainbow, size, speed, either direction) |
 | Laser swords | `swords.py` | Two sabers duelling: wind-up, strike, clash with sparks |
 | Pac-Man | `pacman.py` | A chomping Pac-Man, optionally running along eating dots |
 | Spinning logo | `logo.py` | Any picture, sampled at each LED and spun like a coin |
