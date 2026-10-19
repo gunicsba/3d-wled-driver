@@ -161,6 +161,7 @@ class Engine:
         self.stop, self.blackout, self.gver = False, False, 0
         self.analyzer, self.lock = None, threading.Lock()
         self.sent_fps, self.live_error = 0, ""
+        self.last_frame = None                              # the newest frame of the live deck, for the 3D map viewer
         self._leds_cache = (None, None)
 
     # -- helpers
@@ -274,6 +275,7 @@ class Engine:
             frame = None
             try:
                 frame = self.live_frame()
+                self.last_frame = frame
                 self.live_error = ""
             except Exception as e:                          # a broken effect must not kill the stream
                 self.live_error = f"{type(e).__name__}: {e}"
@@ -523,6 +525,8 @@ class MapViewer:
         self.info = tk.Label(side, bg=PANEL, fg=DIM, justify="left", wraplength=320, font=("Segoe UI", 9))
         self.info.pack(anchor="w")
 
+        self.lit = tk.BooleanVar(value=True)
+        ttk.Checkbutton(side, text="Light the LEDs with the live deck (3D preview)", variable=self.lit).pack(anchor="w", pady=(8, 0))
         self.folded = tk.BooleanVar(value=False)
         ttk.Checkbutton(side, text="Show what the effects see (flat, mirror folded)", variable=self.folded,
                         command=self.redraw).pack(anchor="w", pady=(8, 0))
@@ -572,6 +576,14 @@ class MapViewer:
             ttk.Button(presets, text=text, width=6, command=lambda a=az, e=el: self.preset(a, e)).pack(side="left", padx=2)
         ttk.Button(side, text="Reset everything", command=self.reset).pack(anchor="w")
         self.redraw()
+        self.win.after(100, self.animate)
+
+    def animate(self):
+        if not self.win.winfo_exists():
+            return
+        if self.lit.get() and not self.folded.get() and self.press is None:
+            self.redraw()
+        self.win.after(100, self.animate)
 
     @staticmethod
     def section(parent, text):
@@ -752,6 +764,7 @@ class MapViewer:
         n = len(points)
         top = int(index.max())
         near_all = (depth[:n] - depth[:n].min()) / max(depth[:n].max() - depth[:n].min(), 1e-6)
+        frame = self.app.engine.last_frame if self.lit.get() else None
         image = image.convert("RGBA")
         if plane is not None:                                            # the plane, as a see-through sheet behind the LEDs
             layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
@@ -765,7 +778,11 @@ class MapViewer:
             px, py, near = sx[k], sy[k], near_all[k]
             r = 2.2 + 3.2 * near
             self.shown.append((px, py, number))
-            draw.ellipse([px - r, py - r, px + r, py + r], fill=self.dot_colour(number, top, 0.35 + 0.65 * near))
+            fill = self.dot_colour(number, top, 0.35 + 0.65 * near)
+            if frame is not None:                                        # the real colour of this LED right now
+                rgb = tuple(frame[number * 3:number * 3 + 3]) if number * 3 + 3 <= len(frame) else (0, 0, 0)
+                fill = tuple(min(255, 28 + int(c * (0.5 + 0.5 * near))) for c in rgb)
+            draw.ellipse([px - r, py - r, px + r, py + r], fill=fill)
         for slot, number in enumerate(self.picks):                       # picked LEDs ring and label
             k = by_number.get(number)
             if k is not None:
