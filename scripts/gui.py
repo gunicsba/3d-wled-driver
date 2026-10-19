@@ -55,7 +55,7 @@ EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "b
            ("Tetris (keys)", "tetris"), ("Pong (keys)", "pong"), ("Music visualiser", "music")]
 GLOBAL_DESTS = {"host", "leds", "leds_per_module", "map", "fps", "skip_first", "skip_last", "min_y", "max_y", "flip_v", "flip_x", "background",
                 "bg_brightness", "duration", "list_devices",
-                "map_orient", "map_rotate_x", "map_rotate_y", "map_rotate_z", "view_azimuth", "view_elevation", "view_roll", "view_distance", "mirror_leds"}
+                "map_orient", "map_rotate_x", "map_rotate_y", "map_rotate_z", "view_azimuth", "view_elevation", "view_roll", "view_distance", "mirror_leds", "mirror_angle"}
 ORDERS = ["GRB", "RGB", "BRG", "RBG", "GBR", "BGR"]
 ORIG_PARSE = argparse.ArgumentParser.parse_args
 PREVIEW_W = 260
@@ -73,13 +73,13 @@ def default_globals():
             "map_orient": config.MAP_ORIENT, "map_rotate_x": config.MAP_ROTATE_X, "map_rotate_y": config.MAP_ROTATE_Y,
             "map_rotate_z": config.MAP_ROTATE_Z, "view_azimuth": config.VIEW_AZIMUTH, "view_elevation": config.VIEW_ELEVATION,
             "view_roll": config.VIEW_ROLL, "view_distance": config.VIEW_DISTANCE,
-            "mirror_leds": list(common.parse_mirror(config.MIRROR_LEDS) or [])}
+            "mirror_leds": list(common.parse_mirror(config.MIRROR_LEDS) or []), "mirror_angle": float(config.MIRROR_ANGLE)}
 
 
 def view_from_globals(g):
     return common.View(g["map_orient"], g["map_rotate_x"], g["map_rotate_y"], g["map_rotate_z"],
                        g["view_azimuth"], g["view_elevation"], g["view_roll"], g["view_distance"],
-                       common.parse_mirror(g["mirror_leds"]))
+                       common.parse_mirror(g["mirror_leds"]), g["mirror_angle"])
 
 
 # ---------------------------------------------------------------- effects and their options
@@ -194,7 +194,7 @@ class Engine:
             g["map_orient"], g["map_rotate_x"], g["map_rotate_y"], g["map_rotate_z"])
         ns.view_azimuth, ns.view_elevation, ns.view_roll, ns.view_distance = (
             g["view_azimuth"], g["view_elevation"], g["view_roll"], g["view_distance"])
-        ns.mirror_leds = g["mirror_leds"]
+        ns.mirror_leds, ns.mirror_angle = g["mirror_leds"], g["mirror_angle"]
         ns.background, ns.bg_brightness, ns.duration = g["background"], g["bg_brightness"], 0
         return ns
 
@@ -537,7 +537,7 @@ class MapViewer:
     """Looks at the LEDs of a 3D map: turn it with the mouse, pick the mirror plane, choose where the effects look from.
 
     The picture has two modes. The 3D view (default) shows the whole map as it is, turns with the mouse (drag, wheel
-    to zoom) and lets you click three LEDs to define a mirror plane. "What the effects see" shows the flat picture
+    to zoom) and lets you click two LEDs to define the mirror line. "What the effects see" shows the flat picture
     from the viewpoint of the sliders, with the mirror folded in, which is what the decks draw on.
     """
 
@@ -549,6 +549,7 @@ class MapViewer:
 
     def __init__(self, app):
         self.app, self.rows, self.rows_path, self.photo = app, None, None, None
+        self.vars = {}
         self.orbit = {"az": 30.0, "el": 15.0, "zoom": 1.0}              # how the 3D view is turned (not the effects' viewpoint)
         self.picks = list(app.g["mirror_leds"])                          # LED numbers picked for the mirror plane
         self.shown = []                                                  # (x, y, LED number) on screen, for picking
@@ -575,7 +576,7 @@ class MapViewer:
 
         self.section(side, "Mirror (a symmetric object, e.g. the tractor)")
         self.pick_mode = tk.BooleanVar(value=False)
-        ttk.Checkbutton(side, text="Pick mode: click 3 LEDs in the 3D view", variable=self.pick_mode,
+        ttk.Checkbutton(side, text="Pick mode: click 2 LEDs in the 3D view", variable=self.pick_mode,
                         command=self.redraw).pack(anchor="w")
         self.pick_text = tk.StringVar(value=", ".join(str(n) for n in self.picks))
         row = tk.Frame(side, bg=PANEL)
@@ -586,9 +587,20 @@ class MapViewer:
         entry.bind("<Return>", lambda e: self.picks_typed())
         ttk.Button(row, text="Set", width=5, command=self.picks_typed).pack(side="left")
         ttk.Button(side, text="No mirror", command=self.clear_picks).pack(anchor="w", pady=2)
-        tk.Label(side, text="Pick three LEDs that lie in the middle plane of the object (not in a line). The side of the "
-                            "plane away from the viewpoint then copies the near side, so both sides show the same picture.",
+        tk.Label(side, text="Pick two LEDs on the middle line of the object (e.g. along the tractor's centre), then turn the "
+                            "plane about that line until it cuts the object in half. The side of the plane away from the "
+                            "viewpoint copies the near side, so both sides show the same picture.",
                  bg=PANEL, fg=DIM, wraplength=320, justify="left", font=("Segoe UI", 8)).pack(anchor="w")
+        tk.Label(side, text="Turn the plane about the line (degrees)", bg=PANEL, fg=FG, font=("Segoe UI", 9)).pack(anchor="w", pady=(6, 0))
+        row = tk.Frame(side, bg=PANEL)
+        row.pack(fill="x")
+        self.vars["mirror_angle"] = tk.DoubleVar(value=app.g["mirror_angle"])
+        angle_label = tk.Label(row, text=f"{app.g['mirror_angle']:.0f}", bg=PANEL, fg=FG, width=5)
+        angle = ttk.Scale(row, from_=-180, to=180, variable=self.vars["mirror_angle"], length=250,
+                          command=lambda v: self.moved("mirror_angle", float(v), angle_label))
+        angle.pack(side="left")
+        angle.bind("<ButtonRelease-1>", lambda e: self.released())
+        angle_label.pack(side="left", padx=4)
 
         self.section(side, "Stand the map upright")
         self.orient = tk.BooleanVar(value=app.g["map_orient"] == "auto")
@@ -597,7 +609,6 @@ class MapViewer:
         tk.Label(side, text="Not a flat sheet (a tractor)? Untick it and turn the map until the tractor stands "
                             "upright with its front towards you.", bg=PANEL, fg=DIM, wraplength=320, justify="left",
                  font=("Segoe UI", 8)).pack(anchor="w")
-        self.vars = {}
         for label, key, lo, hi in self.SLIDERS:
             if key == "view_azimuth":
                 self.section(side, "Where the effects look from")
@@ -665,7 +676,7 @@ class MapViewer:
     def set_picks(self, picks):
         self.picks = list(picks)
         self.pick_text.set(", ".join(str(n) for n in self.picks))
-        if len(self.picks) == 3 or not self.picks:         # the effects only see a finished plane
+        if len(self.picks) == 2 or not self.picks:         # the effects only see a finished line
             self.app.g["mirror_leds"] = list(self.picks)
             self.released()
         else:
@@ -676,9 +687,11 @@ class MapViewer:
             picks = [int(v) for v in self.pick_text.get().replace(";", ",").split(",") if v.strip()]
         except ValueError:
             return
-        self.set_picks(picks[:3])
+        self.set_picks(picks[:2])
 
     def clear_picks(self):
+        self.vars["mirror_angle"].set(0)
+        self.app.g["mirror_angle"] = 0.0
         self.set_picks([])
 
     # -- the mouse
@@ -705,7 +718,7 @@ class MapViewer:
         near = [c for c in near if c[0] <= 12]
         if near:
             led = min(near)[1]
-            picks = self.picks if len(self.picks) < 3 else []
+            picks = self.picks if len(self.picks) < 2 else []
             if led not in picks:
                 self.set_picks(picks + [led])
 
@@ -786,16 +799,16 @@ class MapViewer:
         cam = common.View("none", 0, 0, 0, self.orbit["az"], self.orbit["el"], 0, extent * 2.5)   # perspective, so it is really 3D
         plane = None
         extra = []                                                       # corners of the plane, to be projected with the LEDs
-        if len(self.picks) == 3:
+        if len(self.picks) == 2:
             try:
-                a, normal = common.mirror_plane(points, index, tuple(self.picks))
-                u = np.cross(normal, [0.0, 1.0, 0.0])
-                if np.linalg.norm(u) < 1e-6:
-                    u = np.cross(normal, [1.0, 0.0, 0.0])
-                u /= np.linalg.norm(u)
+                a, normal = common.mirror_plane(points, index, tuple(self.picks), g["mirror_angle"])
+                where = {int(i): k for k, i in enumerate(index)}
+                p, q = points[where[self.picks[0]]], points[where[self.picks[1]]]
+                u = (q - p) / np.linalg.norm(q - p)                      # along the line, which lies in the plane
                 v = np.cross(normal, u)
                 half = extent * 0.5
-                plane = [a + u * s * half + v * t * half for s, t in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
+                middle = (p + q) / 2
+                plane = [middle + u * s * half + v * t * half for s, t in ((-1, -1), (1, -1), (1, 1), (-1, 1))]
                 extra = plane
             except SystemExit as e:
                 self.info.configure(text=str(e))
@@ -831,8 +844,8 @@ class MapViewer:
                 draw.ellipse([sx[k] - 9, sy[k] - 9, sx[k] + 9, sy[k] + 9], outline=(255, 190, 0), width=2)
                 draw.text((sx[k] + 11, sy[k] - 6), f"{slot + 1}: LED {number}", fill=(255, 190, 0))
         self.draw_axes(draw, common.View("none", 0, 0, 0, self.orbit["az"], self.orbit["el"], 0, 0))
-        mode = "Pick mode is ON: click three LEDs in the middle plane." if self.pick_mode.get() else "Drag to turn, wheel to zoom."
-        planes = f" Mirror plane through LEDs {', '.join(str(n) for n in self.picks)}." if plane is not None else ""
+        mode = "Pick mode is ON: click two LEDs on the middle line." if self.pick_mode.get() else "Drag to turn, wheel to zoom."
+        planes = f" Mirror plane through the line between LEDs {' and '.join(str(n) for n in self.picks)}, turned {g['mirror_angle']:.0f} degrees." if plane is not None else ""
         self.info.configure(text=f"{os.path.basename(path)}\n{n} LEDs, {extent:.0f} cm across. {mode}{planes} Colours follow the "
                                  f"LED numbers (red to violet), bigger dots are nearer.")
         return image.convert("RGB")
@@ -864,6 +877,8 @@ class App:
         self.root.report_callback_exception = lambda *exc: log.error("error in the window", exc_info=exc)
         self.g = default_globals()
         self.g.update(state.get("g", {}))
+        if len(self.g["mirror_leds"]) != 2:                 # an older version took three LEDs: that plane is gone
+            self.g["mirror_leds"] = []
         self.effects = {name: Effect(label, name) for label, name in EFFECTS}
         decks = {}
         for ident, default in (("A", "tree"), ("B", "snow")):

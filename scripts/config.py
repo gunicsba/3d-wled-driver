@@ -32,10 +32,11 @@ VIEW_ELEVATION = 0.0      # 0 = level, 90 = from above, -90 = from below
 VIEW_ROLL = 0.0           # tilts the picture
 VIEW_DISTANCE = 0.0       # cm: perspective for a viewer this far away, 0 = no perspective
 
-# A mirror plane for a symmetric object (a tractor): three LED numbers that lie in its middle plane, e.g. (12, 340, 780).
-# The LEDs on the far side of the plane (seen from the viewpoint) copy the LEDs on the near side, so both sides show
-# the same picture. None = no mirror.
+# A mirror plane for a symmetric object (a tractor): two LED numbers on its middle line, e.g. (12, 340), and the angle
+# the plane is turned about that line (0 = the plane stands upright through the line). The LEDs on the far side of the
+# plane (seen from the viewpoint) copy the LEDs on the near side, so both sides show the same picture. None = no mirror.
 MIRROR_LEDS = None
+MIRROR_ANGLE = 0.0        # degrees
 
 FLIP_V = False           # True if "up" runs down in your map
 FLIP_X = False           # True if left and right are mirrored in your map (e.g. it was shot from behind the curtain)

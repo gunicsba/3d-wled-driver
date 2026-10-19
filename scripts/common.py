@@ -13,22 +13,23 @@ import config
 Led = namedtuple("Led", "i h x xcm ycm zcm", defaults=(0.0,))
 
 # How a 3D map is turned upright and from where it is looked at (see orient_3d and project_3d)
-# mirror: None, or the numbers of three LEDs that lie in the middle plane of a symmetric object (see mirror_fold)
-View = namedtuple("View", "orient rotate_x rotate_y rotate_z azimuth elevation roll distance mirror",
-                  defaults=("auto", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None))
+# mirror: None, or the numbers of two LEDs on the middle line of a symmetric object; mirror_angle turns the plane about
+# that line (see mirror_plane and mirror_fold)
+View = namedtuple("View", "orient rotate_x rotate_y rotate_z azimuth elevation roll distance mirror mirror_angle",
+                  defaults=("auto", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0))
 
 
 def parse_mirror(value):
-    """Three LED numbers as a tuple, or None. Takes "12,340,780", a list of numbers, or nothing."""
+    """Two LED numbers as a tuple, or None. Takes "12,340", a list of numbers, or nothing."""
     if not value:
         return None
     items = value.replace(";", ",").split(",") if isinstance(value, str) else value
     try:
         numbers = tuple(int(str(v).strip()) for v in items if str(v).strip() != "")
     except ValueError:
-        raise SystemExit(f"mirror LEDs: '{value}' is not three LED numbers like 12,340,780")
-    if len(numbers) != 3:
-        raise SystemExit("mirror LEDs: give exactly three LED numbers like 12,340,780")
+        raise SystemExit(f"mirror LEDs: '{value}' is not two LED numbers like 12,340")
+    if len(numbers) != 2 or numbers[0] == numbers[1]:
+        raise SystemExit("mirror LEDs: give two different LED numbers like 12,340")
     return numbers
 
 COLOURS = {"red": (230, 20, 10), "green": (0, 170, 50), "blue": (20, 80, 255),
@@ -127,26 +128,35 @@ def view_axes(view):
     return toward, right, up
 
 
-def mirror_plane(points, index, leds):
-    """(a point on the plane, its unit normal) through three LEDs of an oriented map."""
+def mirror_plane(points, index, leds, angle=0.0):
+    """(a point on the plane, its unit normal) of the mirror in an oriented map.
+
+    The plane contains the line through the two LEDs. At angle 0 it also contains "up", so it stands upright
+    (the middle plane of a tractor whose two LEDs are along its length); `angle` degrees turn it about the line.
+    """
     import numpy as np
 
     where = {int(i): k for k, i in enumerate(index)}
     missing = [n for n in leds if n not in where]
     if missing:
         raise SystemExit(f"mirror LEDs: LED {missing[0]} is not in the map")
-    a, b, c = (points[where[n]] for n in leds)
-    normal = np.cross(b - a, c - a)
-    length = np.linalg.norm(normal)
-    if length < 1e-6:
-        raise SystemExit("mirror LEDs: the three LEDs are in a line, pick three that do not")
-    return a, normal / length
+    a, b = (points[where[n]] for n in leds)
+    axis = b - a
+    if np.linalg.norm(axis) < 1e-6:
+        raise SystemExit("mirror LEDs: the two LEDs are at the same place")
+    axis = axis / np.linalg.norm(axis)
+    normal = np.cross(axis, [0.0, 1.0, 0.0])
+    if np.linalg.norm(normal) < 1e-6:                                   # the line is vertical: any plane through it will do
+        normal = np.cross(axis, [1.0, 0.0, 0.0])
+    normal /= np.linalg.norm(normal)
+    turn = np.radians(angle)
+    return a, normal * np.cos(turn) + np.cross(axis, normal) * np.sin(turn)
 
 
 def mirror_fold(points, index, view):
     """Folds an oriented map over its mirror plane onto the side the viewer is on.
 
-    The plane runs through the three LEDs in view.mirror. Every LED on the far side moves to where its twin
+    The plane runs through the line between the two LEDs in view.mirror, turned by view.mirror_angle. Every LED on the far side moves to where its twin
     on the near side is, so both halves of a symmetric object show the same picture. Without a mirror the
     points come back unchanged.
     """
@@ -154,7 +164,7 @@ def mirror_fold(points, index, view):
 
     if not view.mirror:
         return points
-    a, normal = mirror_plane(points, index, view.mirror)
+    a, normal = mirror_plane(points, index, view.mirror, view.mirror_angle)
     if normal @ view_axes(view)[0] < 0:                                 # the near side is the positive one
         normal = -normal
     d = (points - a) @ normal
@@ -270,8 +280,10 @@ def parser(description):
     view.add_argument("--map-rotate-y", type=float, default=config.MAP_ROTATE_Y, help="turn the map about y (degrees)")
     view.add_argument("--map-rotate-z", type=float, default=config.MAP_ROTATE_Z, help="turn the map about z (degrees)")
     view.add_argument("--mirror-leds", default=config.MIRROR_LEDS,
-                      help="three LED numbers in the middle plane of a symmetric object, e.g. 12,340,780: the far "
-                           "side copies the near side")
+                      help="two LED numbers on the middle line of a symmetric object, e.g. 12,340: the far "
+                           "side of the plane through that line copies the near side")
+    view.add_argument("--mirror-angle", type=float, default=config.MIRROR_ANGLE,
+                      help="turn the mirror plane about that line (degrees, 0 = upright)")
     view.add_argument("--view-azimuth", type=float, default=config.VIEW_AZIMUTH,
                       help="look from: 0 front, 90 right, 180 behind (degrees)")
     view.add_argument("--view-elevation", type=float, default=config.VIEW_ELEVATION,
@@ -288,7 +300,7 @@ def parser(description):
 def view_from_args(args):
     return View(args.map_orient, args.map_rotate_x, args.map_rotate_y, args.map_rotate_z,
                 args.view_azimuth, args.view_elevation, args.view_roll, args.view_distance,
-                parse_mirror(args.mirror_leds))
+                parse_mirror(args.mirror_leds), args.mirror_angle)
 
 
 def leds_from_args(args):
