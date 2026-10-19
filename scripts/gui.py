@@ -232,7 +232,7 @@ class Deck:
 class Engine:
     def __init__(self, decks, g, effects):
         self.decks, self.g, self.effects = decks, g, effects
-        self.live, self.fade, self.insts = "A", None, {"A": None, "B": None}
+        self.fader, self.fade_anim, self.insts = 0.0, None, {"A": None, "B": None}      # fader: 0 = deck A ... 100 = deck B
         self.stop, self.blackout, self.gver = False, False, 0
         self.analyzer, self.lock = None, threading.Lock()
         self.sent_fps, self.live_error = 0, ""
@@ -329,30 +329,43 @@ class Engine:
             log.info("deck %s built: %s", ident, deck.effect)
         return inst["render"](time.time() - inst["t0"])
 
+    DEAD = 10.0                                              # percent at each end of the fader where only one deck plays
+
+    @property
+    def live(self):
+        """The deck that is heard most."""
+        return "B" if self.mix() >= 0.5 else "A"
+
+    def mix(self):
+        """0 = only deck A ... 1 = only deck B. The first and last 10 % of the fader are all A / all B, the rest blends."""
+        return max(0.0, min(1.0, (self.fader - self.DEAD) / (100 - 2 * self.DEAD)))
+
     def live_frame(self):
-        fade = self.fade
-        if not fade:
-            return self.render_real(self.live)
-        k = (time.time() - fade["t0"]) / max(0.001, fade["dur"])
-        b = self.render_real(fade["to"])
-        if k >= 1:
-            self.live, self.fade = fade["to"], None
-            self.insts[fade["from"]] = None
-            return b
-        a = self.render_real(fade["from"])
-        return bytearray(int(x + (y - x) * k) for x, y in zip(a, b))
+        anim = self.fade_anim                                # the Take button slides the fader over the crossfade time
+        if anim:
+            k = (time.time() - anim["t0"]) / max(0.001, anim["dur"])
+            if k >= 1:
+                self.fader, self.fade_anim = anim["to"], None
+            else:
+                self.fader = anim["from"] + (anim["to"] - anim["from"]) * k
+        mix = self.mix()
+        if mix <= 0:
+            self.insts["B"] = None                           # the deck that is out starts again from the top next time
+            return self.render_real("A")
+        if mix >= 1:
+            self.insts["A"] = None
+            return self.render_real("B")
+        a, b = self.render_real("A"), self.render_real("B")
+        return bytearray(int(x + (y - x) * mix) for x, y in zip(a, b))
 
     def switch(self):
-        target = "B" if self.live == "A" else "A"
+        """Slide the fader to the other end over the crossfade time."""
+        target = 0.0 if self.fader >= 50 else 100.0
         dur = float(self.g["crossfade"])
         if dur <= 0:
-            self.live, self.fade = target, None
+            self.fader, self.fade_anim = target, None
         else:
-            self.fade = {"from": self.live, "to": target, "t0": time.time(), "dur": dur}
-
-    def shown(self):
-        """The deck the UI should mark live (the target while fading)."""
-        return self.fade["to"] if self.fade else self.live
+            self.fade_anim = {"from": self.fader, "to": target, "t0": time.time(), "dur": dur}
 
     def live_loop(self):
         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -477,6 +490,41 @@ class Module:
 
 
 # ---------------------------------------------------------------- the window
+class Crossfader:
+    """A DJ crossfader: left is deck A, right is deck B, the middle blends. The first and last 10 % are all A / all B."""
+
+    W, H, PAD = 224, 40, 14
+
+    def __init__(self, parent, engine):
+        self.engine = engine
+        self.canvas = tk.Canvas(parent, width=self.W, height=self.H, bg=PANEL, highlightthickness=0, cursor="hand2")
+        self.canvas.bind("<Button-1>", self.drag)
+        self.canvas.bind("<B1-Motion>", self.drag)
+        self.draw()
+
+    def drag(self, event):
+        span = self.W - 2 * self.PAD
+        self.engine.fader = max(0.0, min(100.0, (event.x - self.PAD) / span * 100))
+        self.engine.fade_anim = None                         # a hand on the fader stops an automatic crossfade
+        self.draw()
+
+    def draw(self):
+        c, span, x0 = self.canvas, self.W - 2 * self.PAD, self.PAD
+        c.delete("all")
+        dead = span * self.engine.DEAD / 100
+        c.create_rectangle(x0, 16, x0 + span, 22, fill="#30343d", outline="")
+        c.create_rectangle(x0, 16, x0 + dead, 22, fill=ACCENT, outline="")                  # all A
+        c.create_rectangle(x0 + span - dead, 16, x0 + span, 22, fill="#f59e0b", outline="")   # all B
+        c.create_text(x0, 4, text="A", fill=ACCENT, font=("Segoe UI", 9, "bold"), anchor="w")
+        c.create_text(x0 + span, 4, text="B", fill="#f59e0b", font=("Segoe UI", 9, "bold"), anchor="e")
+        c.create_text(x0 + span / 2, 4, text=f"{round(self.engine.mix() * 100)}% B", fill=FG, font=("Segoe UI", 9))
+        x = x0 + span * self.engine.fader / 100
+        c.create_rectangle(x - 7, 8, x + 7, 32, fill=FG, outline="#888")
+        c.create_line(x, 10, x, 30, fill="#555")
+        c.create_text(x0, 36, text="only A", fill=DIM, font=("Segoe UI", 7), anchor="w")
+        c.create_text(x0 + span, 36, text="only B", fill=DIM, font=("Segoe UI", 7), anchor="e")
+
+
 class DeckPanel:
     def __init__(self, app, parent, deck):
         self.app, self.deck, self.timer, self.building = app, deck, None, False
@@ -585,8 +633,8 @@ class DeckPanel:
         self.deck.version += 1
         self.app.save_later()
 
-    def refresh(self, live):
-        self.badge.configure(text="● LIVE" if live else "standby", fg=LIVE if live else DIM)
+    def refresh(self, live, text="● LIVE"):
+        self.badge.configure(text=text if live else "standby", fg=LIVE if live else DIM)
         self.frame.configure(highlightbackground=LIVE if live else PANEL)
         self.error.configure(text=self.deck.error)
         pv = self.deck.preview
@@ -1036,8 +1084,11 @@ class App:
     def build_middle(self, parent):
         mid = tk.Frame(parent, bg=PANEL, width=250)
         mid.pack_propagate(False)
+        tk.Label(mid, text="DJ MIXER", bg=PANEL, fg=FG, font=("Segoe UI", 10, "bold")).pack(pady=(10, 0))
+        self.crossfader = Crossfader(mid, self.engine)
+        self.crossfader.canvas.pack(pady=(2, 0))
         self.take = ttk.Button(mid, text="Take B live  >", style="Big.TButton", command=self.take_live)
-        self.take.pack(fill="x", padx=10, pady=(12, 4))
+        self.take.pack(fill="x", padx=10, pady=(8, 4))
         self.fade_label = tk.Label(mid, bg=PANEL, fg=DIM, font=("Segoe UI", 9))
         self.fade_label.pack()
         fade = tk.DoubleVar(value=self.g["crossfade"])
@@ -1119,7 +1170,7 @@ class App:
         self.save_later()
 
     def take_live(self):
-        log.info("take %s live", "B" if self.engine.live == "A" else "A")
+        log.info("take %s live", "B" if self.engine.fader < 50 else "A")
         self.engine.switch()
 
     def toggle_blackout(self):
@@ -1157,12 +1208,15 @@ class App:
 
     # -- the UI clock
     def tick(self):
-        shown = self.engine.shown()
+        mix = self.engine.mix()
+        on = {"A": mix < 1, "B": mix > 0}
         for ident, panel in self.panels.items():
-            panel.refresh(ident == shown)
-        other = "B" if shown == "A" else "A"
+            share = (1 - mix) if ident == "A" else mix
+            panel.refresh(on[ident], f"● MIX {round(share * 100)}%" if on["A"] and on["B"] else "● LIVE")
+        other = "B" if self.engine.fader < 50 else "A"
         self.take.configure(text=f"Take {other} live  {'>' if other == 'B' else '<'}")
-        self.fade_label.configure(text=f"crossfade {self.g['crossfade']:.1f} s" + ("   (fading...)" if self.engine.fade else ""))
+        self.fade_label.configure(text=f"auto crossfade {self.g['crossfade']:.1f} s" + ("   (fading...)" if self.engine.fade_anim else ""))
+        self.crossfader.draw()
         st = self.module.status
         if st:
             if not self.synced:                              # take the module's current settings once

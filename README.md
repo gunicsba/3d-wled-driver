@@ -75,7 +75,7 @@ pip install -r scripts/requirements.txt
 py scripts/gui.py          (or double-click XMasTractor.bat)
 ```
 
-Pick an effect for each deck. The live deck is on the strip; the other deck is only previewed, so you can tune it. **Take B live** crossfades over the time you choose. The settings form of each effect is built from the script's own options, so new scripts show up in the app by themselves. The middle panel controls the ESP32 (brightness, LED colour order, LED count, skip the boot light show), the map and the background.
+Pick an effect for each deck. The decks are mixed like a DJ mixer: the **crossfader** at the top of the middle panel blends deck A (left) and deck B (right). The first 10 % of the slider is only A, the last 10 % only B, and in between the two effects fade into each other, so you can bring one in slowly or cut between them. A deck that is fully out is only previewed, so you can tune it. **Take B live** slides the fader across by itself over the crossfade time you choose. The settings form of each effect is built from the script's own options, so new scripts show up in the app by themselves. The middle panel controls the ESP32 (brightness, LED colour order, LED count, skip the boot light show), the map and the background.
 
 Tetris and Pong take their keys from the app window while their deck is live: arrow keys, Space to drop (Pong: launch), Z rotates the other way, P pauses, R restarts.
 
