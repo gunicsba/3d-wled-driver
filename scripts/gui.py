@@ -541,7 +541,6 @@ class MapViewer:
     from the viewpoint of the sliders, with the mirror folded in, which is what the decks draw on.
     """
 
-    SIZE = 560
     SLIDERS = [("Turn the map about x", "map_rotate_x", -180, 180), ("Turn the map about y", "map_rotate_y", -180, 180),
                ("Turn the map about z", "map_rotate_z", -180, 180), ("Look from: left - right", "view_azimuth", -180, 180),
                ("Look from: below - above", "view_elevation", -90, 90), ("Tilt the picture", "view_roll", -180, 180),
@@ -550,6 +549,7 @@ class MapViewer:
     def __init__(self, app):
         self.app, self.rows, self.rows_path, self.photo = app, None, None, None
         self.vars = {}
+        self.size = min(560, app.root.winfo_screenheight() - 130)          # the picture shrinks on a small screen
         self.orbit = {"az": 30.0, "el": 15.0, "zoom": 1.0}              # how the 3D view is turned (not the effects' viewpoint)
         self.picks = list(app.g["mirror_leds"])                          # LED numbers picked for the mirror plane
         self.shown = []                                                  # (x, y, LED number) on screen, for picking
@@ -563,8 +563,18 @@ class MapViewer:
         self.picture.bind("<B1-Motion>", self.mouse_drag)
         self.picture.bind("<ButtonRelease-1>", self.mouse_up)
         self.picture.bind("<MouseWheel>", self.mouse_wheel)
-        side = tk.Frame(self.win, bg=PANEL)
-        side.pack(side="left", fill="y", padx=(0, 12), pady=10)
+        holder = tk.Frame(self.win, bg=PANEL)                           # the controls scroll when the screen is too small
+        holder.pack(side="left", fill="both", expand=True, padx=(0, 6), pady=10)
+        canvas = tk.Canvas(holder, bg=PANEL, highlightthickness=0, width=350)
+        bar = ttk.Scrollbar(holder, orient="vertical", command=canvas.yview)
+        side = tk.Frame(canvas, bg=PANEL)
+        side.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        canvas.create_window((0, 0), window=side, anchor="nw")
+        canvas.configure(yscrollcommand=bar.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        bar.pack(side="right", fill="y")
+        canvas.bind("<Enter>", lambda e: canvas.bind_all("<MouseWheel>", lambda ev: canvas.yview_scroll(-1 * (ev.delta // 120), "units")))
+        canvas.bind("<Leave>", lambda e: canvas.unbind_all("<MouseWheel>"))
         self.info = tk.Label(side, bg=PANEL, fg=DIM, justify="left", wraplength=320, font=("Segoe UI", 9))
         self.info.pack(anchor="w")
 
@@ -628,6 +638,8 @@ class MapViewer:
         for text, az, el in (("Front", 0, 0), ("Right", 90, 0), ("Back", 180, 0), ("Left", -90, 0), ("Top", 0, 90)):
             ttk.Button(presets, text=text, width=6, command=lambda a=az, e=el: self.preset(a, e)).pack(side="left", padx=2)
         ttk.Button(side, text="Reset everything", command=self.reset).pack(anchor="w")
+        self.win.update_idletasks()
+        canvas.configure(height=min(side.winfo_reqheight(), self.app.root.winfo_screenheight() - 110))
         self.redraw()
         self.win.after(100, self.animate)
 
@@ -738,7 +750,7 @@ class MapViewer:
 
     def redraw(self):
         from PIL import ImageDraw
-        g, size = self.app.g, self.SIZE
+        g, size = self.app.g, self.size
         path = g["map"] or common.newest_map()
         image = Image.new("RGB", (size, size), (20, 22, 27))
         draw = ImageDraw.Draw(image)
@@ -758,7 +770,7 @@ class MapViewer:
 
     def draw_folded(self, draw, path):
         import numpy as np
-        g, size = self.app.g, self.SIZE
+        g, size = self.app.g, self.size
         view = view_from_globals(g)
         pts = common.map_3d_to_view(self.rows, view)
         xs = np.array([p[1] for p in pts])
@@ -782,7 +794,7 @@ class MapViewer:
     def draw_axes(self, draw, view):
         import numpy as np
         ax, ay, _ = common.project_3d(np.eye(3) * 1.0, view)
-        size = self.SIZE
+        size = self.size
         for k, (name, col) in enumerate((("x right", (255, 90, 90)), ("y up", (90, 255, 120)), ("z front", (110, 160, 255)))):
             end = (60 + ax[k] * 40, size - 60 - ay[k] * 40)
             draw.line([(60, size - 60), end], fill=col, width=2)
@@ -791,7 +803,7 @@ class MapViewer:
     def draw_3d(self, image, path):
         import numpy as np
         from PIL import ImageDraw
-        g, size = self.app.g, self.SIZE
+        g, size = self.app.g, self.size
         view = view_from_globals(g)
         index, points, _ = common.oriented_map(self.rows, view)          # upright, not folded and not yet viewed from anywhere
         centre = (points.min(axis=0) + points.max(axis=0)) / 2
