@@ -19,6 +19,17 @@ MAX_Y = None             # highest height to use
 BACKGROUND = "white"     # colour name (red, blue, ...) or RRGGBB
 BG_BRIGHTNESS = 0.04     # 0 = off ... 1 = full colour; 0.04 is a barely-there white glow
 
+# MariMapper 3D maps: stand the map upright, then choose where you look at it from. The effects run on that view.
+MARIMAPPER_UNIT_CM = 6.6  # cm per unit in a MariMapper 3D map (it measures in LED spacings): your real LED pitch
+MAP_ORIENT = "auto"       # "auto" stands a flat sheet (a curtain) upright by itself, "none" for anything else
+MAP_ROTATE_X = 0.0        # degrees to turn the map about x, then y, then z (after "auto"): sets which way is up and front
+MAP_ROTATE_Y = 0.0
+MAP_ROTATE_Z = 0.0
+VIEW_AZIMUTH = 0.0        # where you look from: 0 = the front, 90 = from the right, 180 = from behind
+VIEW_ELEVATION = 0.0      # 0 = level, 90 = from above, -90 = from below
+VIEW_ROLL = 0.0           # tilts the picture
+VIEW_DISTANCE = 0.0       # cm: perspective for a viewer this far away, 0 = no perspective
+
 FLIP_V = False           # True if "up" runs down in your map
 FLIP_X = False           # True if left and right are mirrored in your map (e.g. it was shot from behind the curtain)
 

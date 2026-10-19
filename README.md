@@ -40,11 +40,25 @@ Later updates go over WiFi, either with `pio run -e xmas_ota -t upload --upload-
 
 ### 2. Map the LEDs
 
-Hang the string the way it will stay, and run MariMapper from a phone or webcam: `marimapper --backend wled --server <module IP>`. Copy the resulting map to `maridata/` (git-ignored). Any CSV with `index,x_cm,y_cm` columns works, or MariMapper's own 2D `index,u,v` files.
+Hang the string the way it will stay, and run MariMapper from a phone or webcam: `marimapper --backend wled --server <module IP>`. Copy the resulting map to `maridata/` (git-ignored). The scripts read three kinds of map:
+
+- MariMapper's **3D** map (`led_map_3d.csv`, with `x,y,z` columns): see [Looking at a 3D map](#looking-at-a-3d-map) below. This is the one to use for anything that isn't flat.
+- A CSV with `index,x_cm,y_cm` columns (positions in centimetres, y up).
+- MariMapper's own 2D `index,u,v` files.
 
 There is an example map (a plain 10 × 20 grid) in `maps/`, which the scripts use when `maridata/` has none, so you can try everything without mapping first.
 
-If the picture comes out mirrored (the map was shot from behind), set `FLIP_X = True`; if LEDs hang loose past the lit area, set `SKIP_FIRST`. See [Settings](#settings).
+For a flat map that came out mirrored (it was shot from behind), set `FLIP_X = True`; if LEDs hang loose past the lit area, set `SKIP_FIRST`. See [Settings](#settings).
+
+#### Looking at a 3D map
+
+The effects draw flat pictures, so a 3D map is first stood upright and then looked at from a **viewpoint**; the effects run on what you see from there.
+
+1. **Stand it upright.** The reconstruction can leave the map turned any way. For a flat sheet like a curtain `MAP_ORIENT = "auto"` does it for you: the long direction becomes up (higher LED numbers higher up), and the side the cameras were on becomes the front. For anything else (a tractor) set `"none"` and turn the map with `MAP_ROTATE_X/Y/Z` until it stands the right way, with its front towards you.
+2. **Choose where to look from.** `VIEW_AZIMUTH` (0 = front, 90 = from the right, 180 = from behind), `VIEW_ELEVATION` (90 = from above) and `VIEW_ROLL` tilt the view; `VIEW_DISTANCE` adds perspective for a viewer that many cm away.
+3. **Scale.** MariMapper measures in LED spacings, so `MARIMAPPER_UNIT_CM` says how many cm that is (your LED pitch).
+
+The app's **3D map view...** button opens a window that shows the LEDs from the current viewpoint (the colours follow the LED numbers, brighter dots are nearer), with sliders and Front / Right / Back / Left / Top presets, so you can line the map up by eye. The decks and their previews follow along. The same settings are command line flags on every script (`--view-azimuth 90`, `--map-rotate-x 90`, ...).
 
 ### 3. Run the app
 

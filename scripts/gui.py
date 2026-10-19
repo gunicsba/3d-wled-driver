@@ -13,6 +13,7 @@ Z, P, R. Settings are remembered in scripts/gui_state.json.
 """
 import argparse
 import copy
+import csv
 import importlib
 import json
 import math
@@ -39,7 +40,8 @@ EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "b
            ("Rainbow", "rainbow"), ("Hungarian flag", "flag_hu"), ("Snowfall", "snow"), ("DVD shapes", "dvd"),
            ("Tetris (keys)", "tetris"), ("Pong (keys)", "pong"), ("Music visualiser", "music")]
 GLOBAL_DESTS = {"host", "leds", "map", "fps", "skip_first", "skip_last", "min_y", "max_y", "flip_v", "flip_x", "background",
-                "bg_brightness", "duration", "list_devices"}
+                "bg_brightness", "duration", "list_devices",
+                "map_orient", "map_rotate_x", "map_rotate_y", "map_rotate_z", "view_azimuth", "view_elevation", "view_roll", "view_distance"}
 ORDERS = ["GRB", "RGB", "BRG", "RBG", "GBR", "BGR"]
 ORIG_PARSE = argparse.ArgumentParser.parse_args
 PREVIEW_W = 260
@@ -53,7 +55,15 @@ def default_globals():
     return {"host": config.HOST, "leds": config.LEDS, "map": config.MAP or "", "fps": 30, "skip_first": config.SKIP_FIRST,
             "skip_last": config.SKIP_LAST, "min_y": config.MIN_Y, "max_y": config.MAX_Y, "flip_v": bool(config.FLIP_V), "flip_x": bool(config.FLIP_X),
             "background": config.BACKGROUND, "bg_brightness": config.BG_BRIGHTNESS, "preview_pitch": 2.5,
-            "crossfade": 1.0, "stream": True}
+            "crossfade": 1.0, "stream": True,
+            "map_orient": config.MAP_ORIENT, "map_rotate_x": config.MAP_ROTATE_X, "map_rotate_y": config.MAP_ROTATE_Y,
+            "map_rotate_z": config.MAP_ROTATE_Z, "view_azimuth": config.VIEW_AZIMUTH, "view_elevation": config.VIEW_ELEVATION,
+            "view_roll": config.VIEW_ROLL, "view_distance": config.VIEW_DISTANCE}
+
+
+def view_from_globals(g):
+    return common.View(g["map_orient"], g["map_rotate_x"], g["map_rotate_y"], g["map_rotate_z"],
+                       g["view_azimuth"], g["view_elevation"], g["view_roll"], g["view_distance"])
 
 
 # ---------------------------------------------------------------- effects and their options
@@ -162,15 +172,21 @@ class Engine:
         ns.host, ns.leds, ns.map, ns.fps = g["host"], g["leds"], g["map"] or None, g["fps"]
         ns.skip_first, ns.skip_last, ns.min_y, ns.max_y, ns.flip_v = g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_v"]
         ns.flip_x = g["flip_x"]
+        ns.map_orient, ns.map_rotate_x, ns.map_rotate_y, ns.map_rotate_z = (
+            g["map_orient"], g["map_rotate_x"], g["map_rotate_y"], g["map_rotate_z"])
+        ns.view_azimuth, ns.view_elevation, ns.view_roll, ns.view_distance = (
+            g["view_azimuth"], g["view_elevation"], g["view_roll"], g["view_distance"])
         ns.background, ns.bg_brightness, ns.duration = g["background"], g["bg_brightness"], 0
         return ns
 
     def real_leds(self):
         g = self.g
-        key = (g["map"], g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_v"], g["flip_x"])
+        key = (g["map"], g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_v"], g["flip_x"],
+               tuple(view_from_globals(g)))
         if self._leds_cache[0] != key:
             path = g["map"] or common.newest_map()
-            self._leds_cache = (key, common.load_map(path, g["flip_v"], g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_x"]))
+            self._leds_cache = (key, common.load_map(path, g["flip_v"], g["skip_first"], g["skip_last"], g["min_y"], g["max_y"], g["flip_x"],
+                                                   view_from_globals(g)))
         return self._leds_cache[1]
 
     def virtual_leds(self):
@@ -455,6 +471,131 @@ class DeckPanel:
             self.image.configure(image=self.photo, width=PREVIEW_W, height=h)
 
 
+class MapViewer:
+    """Shows the LEDs of the map as seen from the viewpoint, to stand a 3D map upright and choose where to look from."""
+
+    SIZE = 540
+    SLIDERS = [("Turn the map about x", "map_rotate_x", -180, 180), ("Turn the map about y", "map_rotate_y", -180, 180),
+               ("Turn the map about z", "map_rotate_z", -180, 180), ("Look from: left - right", "view_azimuth", -180, 180),
+               ("Look from: below - above", "view_elevation", -90, 90), ("Tilt the picture", "view_roll", -180, 180),
+               ("Perspective: viewer distance (cm, 0 = none)", "view_distance", 0, 1500)]
+
+    def __init__(self, app):
+        self.app, self.rows, self.rows_path, self.photo = app, None, None, None
+        self.win = tk.Toplevel(app.root)
+        self.win.title("Map viewer")
+        self.win.configure(bg=PANEL)
+        self.picture = tk.Label(self.win, bg="black")
+        self.picture.pack(side="left", padx=10, pady=10)
+        side = tk.Frame(self.win, bg=PANEL)
+        side.pack(side="left", fill="y", padx=(0, 12), pady=10)
+        self.info = tk.Label(side, bg=PANEL, fg=DIM, justify="left", wraplength=300, font=("Segoe UI", 9))
+        self.info.pack(anchor="w")
+        self.orient = tk.BooleanVar(value=app.g["map_orient"] == "auto")
+        ttk.Checkbutton(side, text="Stand a flat sheet upright by itself (curtain)", variable=self.orient,
+                        command=self.orient_changed).pack(anchor="w", pady=(8, 2))
+        tk.Label(side, text="Not a flat sheet (a tractor)? Untick it and turn the map until the tractor stands "
+                            "upright with its front towards you.", bg=PANEL, fg=DIM, wraplength=300, justify="left",
+                 font=("Segoe UI", 8)).pack(anchor="w")
+        self.vars = {}
+        for label, key, lo, hi in self.SLIDERS:
+            tk.Label(side, text=label, bg=PANEL, fg=FG, font=("Segoe UI", 9)).pack(anchor="w", pady=(8, 0))
+            row = tk.Frame(side, bg=PANEL)
+            row.pack(fill="x")
+            var = tk.DoubleVar(value=app.g[key])
+            self.vars[key] = var
+            value = tk.Label(row, text=f"{app.g[key]:.0f}", bg=PANEL, fg=FG, width=5)
+            scale = ttk.Scale(row, from_=lo, to=hi, variable=var, length=240,
+                              command=lambda v, k=key, lab=value: self.moved(k, float(v), lab))
+            scale.pack(side="left")
+            scale.bind("<ButtonRelease-1>", lambda e: self.released())
+            value.pack(side="left", padx=4)
+        presets = tk.Frame(side, bg=PANEL)
+        presets.pack(anchor="w", pady=10)
+        for text, az, el in (("Front", 0, 0), ("Right", 90, 0), ("Back", 180, 0), ("Left", -90, 0), ("Top", 0, 90)):
+            ttk.Button(presets, text=text, width=6, command=lambda a=az, e=el: self.preset(a, e)).pack(side="left", padx=2)
+        ttk.Button(side, text="Reset everything", command=self.reset).pack(anchor="w")
+        self.redraw()
+
+    def preset(self, azimuth, elevation):
+        for key, value in (("view_azimuth", azimuth), ("view_elevation", elevation)):
+            self.vars[key].set(value)
+            self.app.g[key] = float(value)
+        self.released()
+
+    def reset(self):
+        for _label, key, _lo, _hi in self.SLIDERS:
+            self.vars[key].set(0)
+            self.app.g[key] = 0.0
+        self.orient.set(True)
+        self.app.g["map_orient"] = "auto"
+        self.released()
+
+    def orient_changed(self):
+        self.app.g["map_orient"] = "auto" if self.orient.get() else "none"
+        self.released()
+
+    def moved(self, key, value, label):
+        label.configure(text=f"{value:.0f}")
+        self.app.g[key] = value
+        self.redraw()                                      # the picture follows the slider, the effects catch up on release
+
+    def released(self):
+        self.app.engine.gver += 1                          # the decks rebuild on the new view
+        self.app.save_later()
+        self.redraw()
+
+    def redraw(self):
+        import colorsys
+
+        import numpy as np
+        from PIL import ImageDraw
+        g, size = self.app.g, self.SIZE
+        path = g["map"] or common.newest_map()
+        image = Image.new("RGB", (size, size), (20, 22, 27))
+        draw = ImageDraw.Draw(image)
+        if not common.is_3d_map(path):
+            draw.text((20, 20), "This is a flat map, there is no viewpoint to set.\nChoose a MariMapper 3D map\n"
+                                "(the file with x, y, z columns).", fill=(232, 232, 232))
+            self.info.configure(text=os.path.basename(path))
+        else:
+            if self.rows_path != path:
+                with open(path, newline="") as f:
+                    self.rows, self.rows_path = list(csv.DictReader(f)), path
+            view = view_from_globals(g)
+            pts = common.map_3d_to_view(self.rows, view)
+            xs = np.array([p[1] for p in pts])
+            ys = np.array([p[2] for p in pts])
+            depth = np.array([p[3] for p in pts])
+            span = max(xs.max() - xs.min(), ys.max() - ys.min(), 1e-6)
+            scale = (size - 120) / span
+            ox = (size - (xs.max() - xs.min()) * scale) / 2 - xs.min() * scale
+            oy = (size + (ys.max() - ys.min()) * scale) / 2 + ys.min() * scale
+            at = {p[0]: (xs[k] * scale + ox, oy - ys[k] * scale) for k, p in enumerate(pts)}
+            for i, (px, py) in at.items():                 # the strip, in LED order
+                if i + 1 in at:
+                    draw.line([(px, py), at[i + 1]], fill=(70, 74, 84), width=1)
+            span_d = max(depth.max() - depth.min(), 1e-6)
+            for k, p in enumerate(pts):                    # the LEDs: hue follows the LED number, nearer ones are brighter
+                near = 0.45 + 0.55 * (depth[k] - depth.min()) / span_d
+                rgb = tuple(int(255 * c * near) for c in colorsys.hsv_to_rgb((p[0] / 200.0) % 1.0, 0.85, 1.0))
+                px, py = at[p[0]]
+                draw.ellipse([px - 4, py - 4, px + 4, py + 4], fill=rgb)
+            # where the world axes point from this viewpoint
+            ax, ay, _ = common.project_3d(np.eye(3) * 1.0, view)
+            for k, (name, col) in enumerate((("x right", (255, 90, 90)), ("y up", (90, 255, 120)),
+                                              ("z front", (110, 160, 255)))):
+                end = (60 + ax[k] * 40, size - 60 - ay[k] * 40)
+                draw.line([(60, size - 60), end], fill=col, width=2)
+                draw.text((end[0] + 4, end[1] - 6), name, fill=col)
+            width, height = xs.max() - xs.min(), ys.max() - ys.min()
+            self.info.configure(text=f"{os.path.basename(path)}\n{len(pts)} LEDs, the picture is {width:.0f} x {height:.0f} cm. "
+                                     f"Colours follow the LED numbers (the strip runs from red through the rainbow), "
+                                     f"brighter dots are nearer to you.")
+        self.photo = ImageTk.PhotoImage(image)
+        self.picture.configure(image=self.photo)
+
+
 class App:
     def __init__(self):
         self.root = tk.Tk()
@@ -489,6 +630,7 @@ class App:
         self.engine = Engine(decks, self.g, self.effects)
         self.module = Module(self.g)
         self.save_timer = None
+        self.viewer = None
         self.synced = False
         self.vars = {}
         self.build_ui(decks)
@@ -585,6 +727,7 @@ class App:
         self.map_var = tk.StringVar(value=self.g["map"] or "(newest curtain map)")
         tk.Label(mid, textvariable=self.map_var, bg=PANEL, fg=DIM, font=("Segoe UI", 8), wraplength=220, justify="left").pack(anchor="w", padx=12)
         ttk.Button(mid, text="Choose map file...", command=self.choose_map).pack(fill="x", padx=12, pady=2)
+        ttk.Button(mid, text="3D map view...", command=self.open_map_viewer).pack(fill="x", padx=12, pady=2)
         self.flipx = tk.BooleanVar(value=self.g["flip_x"])
         ttk.Checkbutton(mid, text="Mirror left-right", variable=self.flipx,
                         command=lambda: self.set_g("flip_x", self.flipx.get(), rebuild=True)).pack(anchor="w", padx=12, pady=2)
@@ -632,6 +775,12 @@ class App:
     def toggle_blackout(self):
         self.engine.blackout = not self.engine.blackout
         self.black_btn.configure(text="Blackout ON (click to resume)" if self.engine.blackout else "Blackout")
+
+    def open_map_viewer(self):
+        if self.viewer is not None and self.viewer.win.winfo_exists():
+            self.viewer.win.lift()
+        else:
+            self.viewer = MapViewer(self)
 
     def choose_map(self):
         path = filedialog.askopenfilename(initialdir=os.path.join(HERE, "..", "maridata"), filetypes=[("CSV maps", "*.csv")])
