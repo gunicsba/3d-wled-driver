@@ -15,8 +15,8 @@ Led = namedtuple("Led", "i h x xcm ycm zcm", defaults=(0.0,))
 # How a 3D map is turned upright and from where it is looked at (see orient_3d and project_3d)
 # mirror: None, or the numbers of two LEDs on the middle line of a symmetric object; mirror_angle turns the plane about
 # that line (see mirror_plane and mirror_fold)
-View = namedtuple("View", "orient rotate_x rotate_y rotate_z azimuth elevation roll distance mirror mirror_angle",
-                  defaults=("auto", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0))
+View = namedtuple("View", "orient rotate_x rotate_y rotate_z azimuth elevation roll distance mirror mirror_angle mirror_mode",
+                  defaults=("auto", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None, 0.0, "readable"))
 
 
 def parse_mirror(value):
@@ -34,7 +34,25 @@ def parse_mirror(value):
 
 COLOURS = {"red": (230, 20, 10), "green": (0, 170, 50), "blue": (20, 80, 255),
            "orange": (255, 110, 0), "yellow": (255, 200, 0), "purple": (150, 30, 220),
-           "white": (255, 255, 255), "pink": (255, 70, 150), "cyan": (0, 200, 220), "black": (0, 0, 0)}
+           "white": (255, 255, 255), "pink": (255, 70, 150), "cyan": (0, 200, 220), "black": (0, 0, 0),
+           "gold": (255, 150, 0), "warmwhite": (255, 215, 150), "darkgreen": (0, 110, 30)}
+
+# The Christmas colours, in the order the palette goes through them: red, green, warm white, gold
+XMAS = [(225, 0, 10), (0, 150, 40), (255, 215, 150), (255, 150, 0)]
+
+
+def xmas_colour(pos, blend=0.3):
+    """A colour of the Christmas palette for a position (the palette repeats every 1.0).
+
+    Each of the four colours holds steady and only fades into the next over the last `blend` of its stretch,
+    so you see red, green, warm white and gold rather than muddy mixtures.
+    """
+    x = (pos % 1.0) * len(XMAS)
+    i, f = int(x), x - int(x)
+    k = max(0.0, (f - (1 - blend)) / blend)
+    k = k * k * (3 - 2 * k)                               # smooth fade
+    a, b = XMAS[i % len(XMAS)], XMAS[(i + 1) % len(XMAS)]
+    return tuple(int(p * (1 - k) + q * k) for p, q in zip(a, b))
 
 
 def parse_colour(text):
@@ -128,7 +146,7 @@ def view_axes(view):
     return toward, right, up
 
 
-def mirror_plane(points, index, leds, angle=0.0):
+def mirror_frame(points, index, leds, angle=0.0):
     """(a point on the plane, its unit normal) of the mirror in an oriented map.
 
     The plane contains the line through the two LEDs. At angle 0 it also contains "up", so it stands upright
@@ -150,25 +168,40 @@ def mirror_plane(points, index, leds, angle=0.0):
         normal = np.cross(axis, [1.0, 0.0, 0.0])
     normal /= np.linalg.norm(normal)
     turn = np.radians(angle)
-    return a, normal * np.cos(turn) + np.cross(axis, normal) * np.sin(turn)
+    return a, axis, normal * np.cos(turn) + np.cross(axis, normal) * np.sin(turn)
+
+
+def mirror_plane(points, index, leds, angle=0.0):
+    """(a point on the plane, its unit normal): see mirror_frame"""
+    a, _axis, normal = mirror_frame(points, index, leds, angle)
+    return a, normal
 
 
 def mirror_fold(points, index, view):
     """Folds an oriented map over its mirror plane onto the side the viewer is on.
 
-    The plane runs through the line between the two LEDs in view.mirror, turned by view.mirror_angle. Every LED on the far side moves to where its twin
-    on the near side is, so both halves of a symmetric object show the same picture. Without a mirror the
-    points come back unchanged.
+    The plane runs through the line between the two LEDs in view.mirror, turned by view.mirror_angle. Every LED
+    on the far side takes the place of its twin on the near side, so both halves of a symmetric object show the
+    same picture. With mirror_mode "reflect" that is a true reflection, which shows text backwards on the far
+    side. With "readable" (the default) the far half is also turned end for end along the line, which is the
+    near side seen from the other side: text reads correctly from both sides. Without a mirror the points come
+    back unchanged.
     """
     import numpy as np
 
     if not view.mirror:
         return points
-    a, normal = mirror_plane(points, index, view.mirror, view.mirror_angle)
+    a, axis, normal = mirror_frame(points, index, view.mirror, view.mirror_angle)
     if normal @ view_axes(view)[0] < 0:                                 # the near side is the positive one
         normal = -normal
     d = (points - a) @ normal
-    return points - 2 * np.minimum(d, 0.0)[:, None] * normal
+    far = d < 0
+    folded = points - 2 * np.minimum(d, 0.0)[:, None] * normal
+    if view.mirror_mode == "readable":
+        along = (points - a) @ axis
+        middle = (along.min() + along.max()) / 2                        # the middle of the object, end to end
+        folded = folded + np.where(far, 2 * (middle - along), 0.0)[:, None] * axis
+    return folded
 
 
 def project_3d(points, view):
@@ -293,6 +326,8 @@ def parser(description):
     view.add_argument("--mirror-leds", default=config.MIRROR_LEDS,
                       help="two LED numbers on the middle line of a symmetric object, e.g. 12,340: the far "
                            "side of the plane through that line copies the near side")
+    view.add_argument("--mirror-mode", choices=["readable", "reflect"], default=config.MIRROR_MODE,
+                      help="readable: text reads correctly from both sides; reflect: a true mirror image on the far side")
     view.add_argument("--mirror-angle", type=float, default=config.MIRROR_ANGLE,
                       help="turn the mirror plane about that line (degrees, 0 = upright)")
     view.add_argument("--view-azimuth", type=float, default=config.VIEW_AZIMUTH,
@@ -311,7 +346,7 @@ def parser(description):
 def view_from_args(args):
     return View(args.map_orient, args.map_rotate_x, args.map_rotate_y, args.map_rotate_z,
                 args.view_azimuth, args.view_elevation, args.view_roll, args.view_distance,
-                parse_mirror(args.mirror_leds), args.mirror_angle)
+                parse_mirror(args.mirror_leds), args.mirror_angle, args.mirror_mode)
 
 
 def leds_from_args(args):

@@ -15,7 +15,7 @@ import common
 
 def build(leds, args):
     bg = common.background(args)
-    r, g, b = (int(args.color[k:k + 2], 16) for k in (0, 2, 4))
+    r, g, b = common.parse_colour(args.color)
     # where each LED is along the direction the line travels: 0 = up, 90 = to the right, 180 = down, -90 = to the left
     a = math.radians(args.angle)
     along = {l.i: l.xcm * math.sin(a) + l.ycm * math.cos(a) for l in leds}
@@ -33,7 +33,12 @@ def build(leds, args):
             k = max(0.0, 1 - abs(h - line) / args.width)  # soft-edged triangle
             if k <= 0:
                 continue
-            c = tuple(int(255 * v) for v in colorsys.hsv_to_rgb(h, 1, 1)) if args.rainbow else (r, g, b)
+            if args.xmas:
+                c = common.xmas_colour(h * 2)
+            elif args.rainbow:
+                c = tuple(int(255 * v) for v in colorsys.hsv_to_rgb(h, 1, 1))
+            else:
+                c = (r, g, b)
             frame[idx * 3:idx * 3 + 3] = bytes(int(v * k + b0 * (1 - k)) for v, b0 in zip(c, bg))
         return frame
 
@@ -42,9 +47,10 @@ def build(leds, args):
 
 def main():
     ap = common.parser(__doc__)
-    ap.add_argument("--color", default="ffffff", help="RRGGBB (ignored with --rainbow)")
+    ap.add_argument("--color", default="ffffff", help="colour name or RRGGBB (ignored with --rainbow or --xmas)")
     ap.add_argument("--angle", type=float, default=0.0,
                     help="direction the line travels in degrees: 0 up, 90 right, 180 down, -90 left, 45 diagonal")
+    ap.add_argument("--xmas", action="store_true", help="Christmas colours (red, green, warm white, gold) along the line's way")
     ap.add_argument("--rainbow", action="store_true", help="colour follows the line's height")
     ap.add_argument("--width", type=float, default=0.06, help="half thickness of the line, 0-1 of the height")
     ap.add_argument("--period", type=float, default=5.0, help="seconds per sweep")

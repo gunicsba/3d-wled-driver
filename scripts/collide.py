@@ -48,7 +48,8 @@ def build(leds, args):
             step = 2 * math.pi / args.lines
             cycles.clear()
             cycles[n] = [(base + k * step + rng.uniform(-0.35, 0.35) * step,
-                          tuple(255 * v for v in colorsys.hsv_to_rgb((hue0 + k / args.lines) % 1.0, 1.0, 1.0)),
+                          common.XMAS[k % len(common.XMAS)] if args.xmas
+                          else tuple(255 * v for v in colorsys.hsv_to_rgb((hue0 + k / args.lines) % 1.0, 1.0, 1.0)),
                           rng.uniform(-0.12, 0.12)) for k in range(args.lines)]     # direction, colour, arrives a bit early or late
         return cycles[n]
 
@@ -127,6 +128,7 @@ def main():
     ap = common.parser(__doc__)
     ap.add_argument("--lines", type=int, default=6, help="how many coloured lines come in")
     ap.add_argument("--approach", type=float, default=2.2, help="seconds the lines take to arrive")
+    ap.add_argument("--xmas", action="store_true", help="only Christmas colours: red, green, warm white and gold")
     ap.add_argument("--pause", type=float, default=0.8, help="dark seconds before the next round")
     ap.add_argument("--width", type=float, default=0, help="half the thickness of a line in cm (default: from the LED spacing)")
     ap.add_argument("--center", help="where they meet as x,y in cm (default: middle of the picture)")

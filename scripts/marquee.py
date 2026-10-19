@@ -41,7 +41,7 @@ def build(leds, args):
     width, height = (xmax - xmin) or 1.0, (ymax - ymin) or 1.0
     pitch = common.pitch_of(leds)
     bg = common.background(args)
-    r, g, b = (int(args.color[k:k + 2], 16) for k in (0, 2, 4))
+    r, g, b = common.parse_colour(args.color)
 
     # the text on a bitmap: baseline at `base`, capital letters FONT_PX tall
     font = load_font(FONT_PX)
@@ -82,7 +82,9 @@ def build(leds, args):
             k = min(1.0, pix[u, v] / 255 * 1.8)
             if k <= 0.02:
                 continue
-            if args.rainbow:
+            if args.xmas:
+                c = common.xmas_colour((l.xcm - xmin) / width * 1.2 + t * 0.15)
+            elif args.rainbow:
                 c = tuple(int(255 * q) for q in colorsys.hsv_to_rgb(((l.xcm - xmin) / width * 0.8 + t * 0.15) % 1.0, 1, 1))
             else:
                 c = (r, g, b)
@@ -95,7 +97,8 @@ def build(leds, args):
 def main():
     ap = common.parser(__doc__)
     ap.add_argument("--text", default="MERRY XMAS", help="what to show")
-    ap.add_argument("--color", default="ff2020", help="RRGGBB (ignored with --rainbow)")
+    ap.add_argument("--color", default="ff2020", help="colour name or RRGGBB (ignored with --rainbow or --xmas)")
+    ap.add_argument("--xmas", action="store_true", help="Christmas colours (red, green, warm white, gold) drifting along the text")
     ap.add_argument("--rainbow", action="store_true", help="colours that drift along the text")
     ap.add_argument("--size", type=float, default=0.5, help="height of the capital letters as a part of the picture height")
     ap.add_argument("--y", type=float, default=0.5, help="where the text sits: 0 bottom, 1 top")

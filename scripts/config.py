@@ -37,6 +37,8 @@ VIEW_DISTANCE = 0.0       # cm: perspective for a viewer this far away, 0 = no p
 # plane (seen from the viewpoint) copy the LEDs on the near side, so both sides show the same picture. None = no mirror.
 MIRROR_LEDS = None
 MIRROR_ANGLE = 0.0        # degrees
+MIRROR_MODE = "readable"  # "readable": the far side is the near side turned round, so text reads correctly from both sides
+                          # "reflect": the far side is the near side reflected, like a real mirror (text is backwards there)
 
 FLIP_V = False           # True if "up" runs down in your map
 FLIP_X = False           # True if left and right are mirrored in your map (e.g. it was shot from behind the curtain)

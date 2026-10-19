@@ -55,12 +55,72 @@ EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "b
            ("Tetris (keys)", "tetris"), ("Pong (keys)", "pong"), ("Music visualiser", "music")]
 GLOBAL_DESTS = {"host", "leds", "leds_per_module", "map", "fps", "skip_first", "skip_last", "min_y", "max_y", "flip_v", "flip_x", "background",
                 "bg_brightness", "duration", "list_devices",
-                "map_orient", "map_rotate_x", "map_rotate_y", "map_rotate_z", "view_azimuth", "view_elevation", "view_roll", "view_distance", "mirror_leds", "mirror_angle"}
+                "map_orient", "map_rotate_x", "map_rotate_y", "map_rotate_z", "view_azimuth", "view_elevation", "view_roll", "view_distance", "mirror_leds", "mirror_angle", "mirror_mode"}
 ORDERS = ["GRB", "RGB", "BRG", "RBG", "GBR", "BGR"]
 ORIG_PARSE = argparse.ArgumentParser.parse_args
 PREVIEW_W = 260
 FORM_W = 250
 BG, PANEL, FG, DIM, ACCENT, LIVE = "#1b1d22", "#24272e", "#e8e8e8", "#8a8f98", "#3b82f6", "#e5484d"
+
+# basic colours for the colour picker: (name the scripts understand, shown as)
+BASIC_COLOURS = ["red", "orange", "gold", "yellow", "green", "darkgreen", "cyan", "blue", "purple", "pink", "warmwhite", "white"]
+
+
+def swatch(text):
+    """The on-screen colour of a name or RRGGBB (grey if it is not one)."""
+    try:
+        return "#%02x%02x%02x" % common.parse_colour(text.strip() or "000000")
+    except (SystemExit, ValueError):
+        return "#555555"
+
+
+class ColourPicker:
+    """A button showing a colour; clicking it opens the basic colours and 'More...' for any other."""
+
+    def __init__(self, parent, var, on_pick=None):
+        self.var, self.on_pick = var, on_pick
+        self.button = tk.Button(parent, width=3, relief="solid", bd=1, cursor="hand2", command=self.open)
+        var.trace_add("write", lambda *_a: self.paint())
+        self.paint()
+
+    def paint(self):
+        colour = swatch(self.var.get())
+        self.button.configure(bg=colour, activebackground=colour)
+
+    def open(self):
+        pop = tk.Toplevel(self.button)
+        pop.overrideredirect(True)
+        pop.configure(bg="#3a3f4a")
+        pop.geometry(f"+{self.button.winfo_rootx()}+{self.button.winfo_rooty() + self.button.winfo_height() + 2}")
+        grid = tk.Frame(pop, bg="#3a3f4a", padx=4, pady=4)
+        grid.pack()
+        for n, name in enumerate(BASIC_COLOURS):
+            tk.Button(grid, bg=swatch(name), activebackground=swatch(name), width=3, height=1, relief="flat", cursor="hand2",
+                      command=lambda c=name: self.pick(pop, c)).grid(row=n // 4, column=n % 4, padx=2, pady=2)
+        ttk.Button(grid, text="More...", command=lambda: self.more(pop)).grid(row=3, column=0, columnspan=4, sticky="ew", pady=(4, 0))
+        pop.bind("<FocusOut>", lambda e: pop.destroy())
+        pop.focus_set()
+
+    def pick(self, pop, colour):
+        pop.destroy()
+        self.var.set(colour)
+        if self.on_pick:
+            self.on_pick()
+
+    def more(self, pop):
+        from tkinter import colorchooser
+        pop.destroy()
+        _rgb, hex_colour = colorchooser.askcolor(color=swatch(self.var.get()), parent=self.button)
+        if hex_colour:
+            self.var.set(hex_colour.lstrip("#"))
+            if self.on_pick:
+                self.on_pick()
+
+
+def is_colour(spec):
+    return spec["kind"] == "str" and ("RRGGBB" in (spec["help"] or "") or "colour" in (spec["help"] or "").lower()
+                                      or "color" in spec["dest"])
+
 
 KEYS = queue.Queue()                                   # key presses from the window, read by the games on the live deck
 
@@ -73,13 +133,14 @@ def default_globals():
             "map_orient": config.MAP_ORIENT, "map_rotate_x": config.MAP_ROTATE_X, "map_rotate_y": config.MAP_ROTATE_Y,
             "map_rotate_z": config.MAP_ROTATE_Z, "view_azimuth": config.VIEW_AZIMUTH, "view_elevation": config.VIEW_ELEVATION,
             "view_roll": config.VIEW_ROLL, "view_distance": config.VIEW_DISTANCE,
-            "mirror_leds": list(common.parse_mirror(config.MIRROR_LEDS) or []), "mirror_angle": float(config.MIRROR_ANGLE)}
+            "mirror_leds": list(common.parse_mirror(config.MIRROR_LEDS) or []), "mirror_angle": float(config.MIRROR_ANGLE),
+            "mirror_mode": config.MIRROR_MODE}
 
 
 def view_from_globals(g):
     return common.View(g["map_orient"], g["map_rotate_x"], g["map_rotate_y"], g["map_rotate_z"],
                        g["view_azimuth"], g["view_elevation"], g["view_roll"], g["view_distance"],
-                       common.parse_mirror(g["mirror_leds"]), g["mirror_angle"])
+                       common.parse_mirror(g["mirror_leds"]), g["mirror_angle"], g["mirror_mode"])
 
 
 # ---------------------------------------------------------------- effects and their options
@@ -194,7 +255,7 @@ class Engine:
             g["map_orient"], g["map_rotate_x"], g["map_rotate_y"], g["map_rotate_z"])
         ns.view_azimuth, ns.view_elevation, ns.view_roll, ns.view_distance = (
             g["view_azimuth"], g["view_elevation"], g["view_roll"], g["view_distance"])
-        ns.mirror_leds, ns.mirror_angle = g["mirror_leds"], g["mirror_angle"]
+        ns.mirror_leds, ns.mirror_angle, ns.mirror_mode = g["mirror_leds"], g["mirror_angle"], g["mirror_mode"]
         ns.background, ns.bg_brightness, ns.duration = g["background"], g["bg_brightness"], 0
         return ns
 
@@ -484,6 +545,11 @@ class DeckPanel:
                     base = abs(spec["default"]) if isinstance(spec["default"], (int, float)) and spec["default"] else 1.0
                     step = 1 if spec["kind"] == "int" else 10 ** (math.floor(math.log10(base)) - 1)
                     ttk.Spinbox(row, textvariable=var, from_=-1e6, to=1e6, increment=step).pack(fill="x")
+                elif is_colour(spec):
+                    line = tk.Frame(row, bg=PANEL)
+                    line.pack(fill="x")
+                    ColourPicker(line, var).button.pack(side="left", padx=(0, 6))
+                    ttk.Entry(line, textvariable=var).pack(side="left", fill="x", expand=True)
                 else:
                     ttk.Entry(row, textvariable=var).pack(fill="x")
             if spec["help"]:
@@ -596,6 +662,9 @@ class MapViewer:
         entry.pack(side="left", padx=6)
         entry.bind("<Return>", lambda e: self.picks_typed())
         ttk.Button(row, text="Set", width=5, command=self.picks_typed).pack(side="left")
+        self.readable = tk.BooleanVar(value=app.g["mirror_mode"] == "readable")
+        ttk.Checkbutton(side, text="Text reads correctly from both sides", variable=self.readable,
+                        command=self.mode_changed).pack(anchor="w")
         ttk.Button(side, text="No mirror", command=self.clear_picks).pack(anchor="w", pady=2)
         tk.Label(side, text="Pick two LEDs on the middle line of the object (e.g. along the tractor's centre), then turn the "
                             "plane about that line until it cuts the object in half. The side of the plane away from the "
@@ -669,6 +738,10 @@ class MapViewer:
         self.orient.set(True)
         self.app.g["map_orient"] = "auto"
         self.clear_picks()
+
+    def mode_changed(self):
+        self.app.g["mirror_mode"] = "readable" if self.readable.get() else "reflect"
+        self.released()
 
     def orient_changed(self):
         self.app.g["map_orient"] = "auto" if self.orient.get() else "none"
@@ -1006,7 +1079,7 @@ class App:
                         command=lambda: self.set_g("flip_x", self.flipx.get(), rebuild=True)).pack(anchor="w", padx=12, pady=2)
         self.entry_row(mid, "Skip first LEDs", "skip_first", int)
         self.entry_row(mid, "Skip last LEDs", "skip_last", int)
-        self.entry_row(mid, "Background", "background", str)
+        self.entry_row(mid, "Background", "background", str, colour=True)
         self.entry_row(mid, "Background brightness", "bg_brightness", float)
         self.entry_row(mid, "Frames per second", "fps", int, live=True)
         self.entry_row(mid, "Preview pixel size (cm)", "preview_pitch", float, live=True)
@@ -1016,7 +1089,7 @@ class App:
         tk.Frame(parent, bg="#3a3f4a", height=1).pack(fill="x", padx=10, pady=(10, 4))
         tk.Label(parent, text=text, bg=PANEL, fg=FG, font=("Segoe UI", 10, "bold")).pack(anchor="w", padx=12)
 
-    def entry_row(self, parent, label, key, cast, live=False):
+    def entry_row(self, parent, label, key, cast, live=False, colour=False):
         row = tk.Frame(parent, bg=PANEL)
         row.pack(fill="x", padx=12, pady=2)
         tk.Label(row, text=label, bg=PANEL, fg=FG, font=("Segoe UI", 9)).pack(side="left")
@@ -1031,6 +1104,8 @@ class App:
                 pass
         entry.bind("<Return>", commit)
         entry.bind("<FocusOut>", commit)
+        if colour:
+            ColourPicker(row, var, on_pick=commit).button.pack(side="right", padx=(0, 6))
         self.add_var(key, var)
 
     # -- actions

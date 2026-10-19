@@ -50,7 +50,10 @@ def build(leds, args):
         for (i, _, _), h in zip(pos, hues):
             if i >= args.leds:
                 continue
-            r, g, b = colorsys.hsv_to_rgb((h + direction * cycle) % 1.0, 1.0, kick)
+            if args.palette == "xmas":
+                r, g, b = (v / 255 * kick for v in common.xmas_colour((h + direction * cycle) % 1.0))
+            else:
+                r, g, b = colorsys.hsv_to_rgb((h + direction * cycle) % 1.0, 1.0, kick)
             frame[i * 3:i * 3 + 3] = bytes((int(r * 255), int(g * 255), int(b * 255)))
         return frame
 
@@ -61,6 +64,8 @@ def main():
     ap = common.parser(__doc__)
     ap.add_argument("--center", default="50%,50%", help='centre: cm "x,y" or percent "50%%,50%%"')
     ap.add_argument("--bpm", type=float, default=120, help="beats per minute")
+    ap.add_argument("--palette", choices=["rainbow", "xmas"], default="rainbow",
+                    help="rainbow colours, or just the Christmas ones: red, green, warm white and gold")
     ap.add_argument("--beats", type=float, default=4, help="beats for the rainbow to go round once")
     ap.add_argument("--bands", type=float, default=70, help="rings mode: cm per full rainbow")
     ap.add_argument("--mode", choices=["rings", "sweep"], default="rings")
