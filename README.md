@@ -1,4 +1,6 @@
-# XMasTractor
+# XMasTractor: a 3D WLED driver
+
+XMasTractor is a driver for addressable LEDs in 3D: map a string with a camera ([MariMapper](https://github.com/TheMariday/marimapper)), choose a viewpoint (and a mirror plane for a symmetric object), and the effects draw on what you see from there. It talks WLED's realtime protocol, drives up to 1000 LEDs per module and any number of modules.
 
 Christmas lights you can play with: an ESP32 firmware that turns a string of addressable LEDs into a network display, plus a Python app and a collection of effects that draw on it. Hang the string as a curtain, map it with a phone camera, and then run a Christmas tree, falling snow, a dancing Santa, a waving Hungarian flag, Tetris, Pong or music-reactive visuals on it.
 
@@ -149,4 +151,4 @@ docs/       pictures for this README (scripts/make_gallery.py redraws the galler
 
 ## License
 
-Not chosen yet.
+[WTFPL](LICENSE): do what you want.
