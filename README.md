@@ -2,6 +2,8 @@
 
 XMasTractor is a driver for addressable LEDs in 3D: map a string with a camera ([MariMapper](https://github.com/TheMariday/marimapper)), choose a viewpoint (and a mirror plane for a symmetric object), and the effects draw on what you see from there. It talks WLED's realtime protocol, drives up to 1000 LEDs per module and any number of modules.
 
+**It needs [MariMapper](https://github.com/TheMariday/marimapper):** the LEDs have to be mapped into 3D first (a MariMapper `led_map_3d.csv`), whatever shape they are hung in: a curtain, a sphere, a tree, a tractor. Without a map you only get the effects' own pixel order; with it, every effect draws on the real positions.
+
 Christmas lights you can play with: an ESP32 firmware that turns a string of addressable LEDs into a network display, plus a Python app and a collection of effects that draw on it. Hang the string as a curtain, map it with a phone camera, and then run a Christmas tree, falling snow, a dancing Santa, a waving Hungarian flag, Tetris, Pong or music-reactive visuals on it.
 
 It runs on the brain board of [AgIsoAuxInputs](https://github.com/gunicsba/AgIsoAuxInputs) (ESP32-S3, LED output on GPIO7). The firmware here is separate and does not use ISOBUS or CAN: the board is only the hardware.
@@ -41,6 +43,8 @@ On first boot every tenth LED blinks red until the module is online (on your WiF
 Later updates go over WiFi, either with `pio run -e xmas_ota -t upload --upload-port <its IP>` or by dropping the `.bin` on the module's web page at `/update`. That page (open the module's IP in a browser) also has the built-in effects, a brightness control, and the name and LED count of the module. If several modules are on the network, each has its own name and settings.
 
 ### 2. Map the LEDs
+
+This step is required for the 3D features: MariMapper films the string from a few camera positions and works out where every LED is in 3D space. Install it from its own repository and keep it next to this project (it is not part of it).
 
 Hang the string the way it will stay, and run MariMapper from a phone or webcam: `marimapper --backend wled --server <module IP>`. Copy the resulting map to `maridata/` (git-ignored). The scripts read three kinds of map:
 
