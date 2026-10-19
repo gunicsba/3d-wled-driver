@@ -3,7 +3,7 @@
     python scripts/santa.py
     python scripts/santa.py --bpm 110
 
-Santa bobs and sways to the beat, waves his arms alternately and kicks his legs;
+Santa bobs and sways to the beat, waves his arms alternately and kicks his legs (with --legs; by default he is just a torso);
 the background pulses softly in changing colours on every beat. All sizes are
 scaled from the picture height; with widely spaced LEDs he is drawn chunkier.
 Host, LED count, map and boundaries live in scripts/config.py.
@@ -35,7 +35,7 @@ def tri(p0, p1, p2, col, m):
                                          min(p[1] for p in (p0, p1, p2)) - m, max(p[1] for p in (p0, p1, p2)) + m)
 
 
-def figure(t, beat, m, k, detail):
+def figure(t, beat, m, k, detail, legs):
     """Santa at time t as shapes in paint order: (distance function, its arguments, colour, bounding box).
 
     Everything that depends on the dance is worked out here, once per frame, not once per LED. k makes the
@@ -49,7 +49,7 @@ def figure(t, beat, m, k, detail):
     shapes = []
 
     # legs: one foot kicks up while the other stays down, alternating
-    for side in (-1, 1):
+    for side in (-1, 1) if legs else ():
         kick = max(0.0, math.sin(ph / 2 + (0 if side < 0 else math.pi)))
         fx = side * (9 + 8 * kick) * k
         fy = 8 + 22 * kick + bob * 0.5
@@ -112,12 +112,13 @@ def build(leds, args):
     coarse = pitch / ((ymax - ymin) or 1.0) * 200         # LED spacing as a part of the picture, in design units
     k = max(1.35, min(2.0, coarse / 6))                  # sparse LEDs: a chunkier Santa, or he is a few dots
     detail = coarse < 7
-    S = (ymax - ymin) / (144 + 50 * k)                    # scale from the design, which is this tall for this k
+    low = 0.0 if args.legs else 66.0                      # without legs the picture starts at the coat's hem
+    S = (ymax - ymin) / (144 + 50 * k - low)              # scale from the design, which is this tall for this k
     beat = 60.0 / args.bpm
     bg = common.background(args)
     soft = 0.6 * pitch / S                                # an edge fades over about one LED, in design units
     # where the LEDs are in design units (centre x = 0, floor y = 0): they never move
-    placed = [(l.i, (l.xcm - cx) / S, (l.ycm - ymin) / S) for l in leds]
+    placed = [(l.i, (l.xcm - cx) / S, (l.ycm - ymin) / S + low) for l in leds]
 
     def colour_at(x, y, base, shapes):
         c = base
@@ -136,11 +137,11 @@ def build(leds, args):
 
     def scene(x, y, t):
         """Colour of the picture at (x, y) in cm."""
-        return colour_at((x - cx) / S, (y - ymin) / S, background_at(t), figure(t, beat, soft, k, detail))
+        return colour_at((x - cx) / S, (y - ymin) / S + low, background_at(t), figure(t, beat, soft, k, detail, args.legs))
 
     def render(t):
         frame = common.new_frame(args)
-        base, shapes = background_at(t), figure(t, beat, soft, k, detail)
+        base, shapes = background_at(t), figure(t, beat, soft, k, detail, args.legs)
         for i, x, y in placed:
             if i < args.leds:
                 frame[i * 3:i * 3 + 3] = bytes(colour_at(x, y, base, shapes))
@@ -152,6 +153,7 @@ def build(leds, args):
 
 def main():
     ap = common.parser(__doc__)
+    ap.add_argument("--legs", action="store_true", help="draw his legs too (default: just the torso, which is bigger)")
     ap.add_argument("--bpm", type=float, default=100, help="dance tempo (beats per minute)")
     args = ap.parse_args()
     common.run(args, build(common.leds_from_args(args), args))
