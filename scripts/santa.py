@@ -90,25 +90,12 @@ def figure(t, beat, m, k, detail, legs):
     return shapes
 
 
-def pitch_of(leds):
-    """Typical distance (cm) from an LED to its nearest neighbour that is somewhere else."""
-    import numpy as np
-
-    pts = np.array([(l.xcm, l.ycm) for l in leds])
-    if len(pts) < 2:
-        return 10.0
-    sample = pts[::max(1, len(pts) // 400)]
-    d = np.sqrt(((sample[:, None, :] - pts[None, :, :]) ** 2).sum(axis=2))
-    d[d < 1e-6] = np.inf                                  # itself, and LEDs a mirror put on the same spot
-    return float(np.median(d.min(axis=1)))
-
-
 def build(leds, args):
     xs = [l.xcm for l in leds]
     ys = [l.ycm for l in leds]
     xmin, xmax, ymin, ymax = min(xs), max(xs), min(ys), max(ys)
     cx = (xmin + xmax) / 2
-    pitch = pitch_of(leds)
+    pitch = common.pitch_of(leds)
     coarse = pitch / ((ymax - ymin) or 1.0) * 200         # LED spacing as a part of the picture, in design units
     k = max(1.35, min(2.0, coarse / 6))                  # sparse LEDs: a chunkier Santa, or he is a few dots
     detail = coarse < 7

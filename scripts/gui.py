@@ -49,7 +49,7 @@ def setup_logging():
     log.setLevel(logging.INFO)
     threading.excepthook = lambda a: log.error("thread %s crashed", a.thread.name if a.thread else "?",
                                                exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
-EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "boom"), ("Laser swords", "swords"),
+EFFECTS = [("Sweep line", "sweep"), ("Christmas tree", "tree"), ("Explosion", "boom"), ("Colliding lines", "collide"), ("Laser swords", "swords"),
            ("Pac-Man", "pacman"), ("Spinning logo", "logo"), ("Dancing Santa", "santa"), ("Tractor", "tractor"),
            ("Rainbow", "rainbow"), ("Hungarian flag", "flag_hu"), ("Snowfall", "snow"), ("DVD shapes", "dvd"),
            ("Tetris (keys)", "tetris"), ("Pong (keys)", "pong"), ("Music visualiser", "music")]

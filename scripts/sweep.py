@@ -1,12 +1,14 @@
-"""Horizontal line that sweeps up through the curtain map, streamed over DDP.
+"""A line that sweeps across the map (up by default, any angle), streamed over DDP.
 
     python scripts/sweep.py
     python scripts/sweep.py --color ff0000 --width 0.08 --period 4
     python scripts/sweep.py --rainbow --mode bounce
+    python scripts/sweep.py --angle 45        (a diagonal line moving up and to the right)
 
 Host, LED count, map and boundaries live in scripts/config.py.
 """
 import colorsys
+import math
 
 import common
 
@@ -14,13 +16,18 @@ import common
 def build(leds, args):
     bg = common.background(args)
     r, g, b = (int(args.color[k:k + 2], 16) for k in (0, 2, 4))
+    # where each LED is along the direction the line travels: 0 = up, 90 = to the right, 180 = down, -90 = to the left
+    a = math.radians(args.angle)
+    along = {l.i: l.xcm * math.sin(a) + l.ycm * math.cos(a) for l in leds}
+    lo, hi = min(along.values()), max(along.values())
+    along = {i: (v - lo) / ((hi - lo) or 1.0) for i, v in along.items()}
 
     def render(t):
         phase = (t / args.period) % 1.0
         pos = phase if args.mode == "up" else 1 - phase if args.mode == "down" else 1 - abs(2 * phase - 1)
         line = pos * (1 + 2 * args.width) - args.width  # run past both ends so the line fully leaves
         frame = common.new_frame(args)
-        for idx, h, *_ in leds:
+        for idx, h in along.items():
             if idx >= args.leds:
                 continue
             k = max(0.0, 1 - abs(h - line) / args.width)  # soft-edged triangle
@@ -36,6 +43,8 @@ def build(leds, args):
 def main():
     ap = common.parser(__doc__)
     ap.add_argument("--color", default="ffffff", help="RRGGBB (ignored with --rainbow)")
+    ap.add_argument("--angle", type=float, default=0.0,
+                    help="direction the line travels in degrees: 0 up, 90 right, 180 down, -90 left, 45 diagonal")
     ap.add_argument("--rainbow", action="store_true", help="colour follows the line's height")
     ap.add_argument("--width", type=float, default=0.06, help="half thickness of the line, 0-1 of the height")
     ap.add_argument("--period", type=float, default=5.0, help="seconds per sweep")

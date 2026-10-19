@@ -255,6 +255,19 @@ def load_map(path, flip_v=False, skip_first=0, skip_last=0, min_y=None, max_y=No
     return [Led(i, h, x, xc_, yc_, zc_) for (i, xc_, yc_, zc_), h, x in zip(pts, hs, xs)]
 
 
+def pitch_of(leds):
+    """Typical distance (cm) from an LED to its nearest neighbour that is somewhere else."""
+    import numpy as np
+
+    pts = np.array([(l.xcm, l.ycm) for l in leds])
+    if len(pts) < 2:
+        return 10.0
+    sample = pts[::max(1, len(pts) // 400)]
+    d = np.sqrt(((sample[:, None, :] - pts[None, :, :]) ** 2).sum(axis=2))
+    d[d < 1e-6] = np.inf                                  # itself, and LEDs a mirror put on the same spot
+    return float(np.median(d.min(axis=1)))
+
+
 def parser(description):
     """ArgumentParser with the common flags; defaults come from config.py."""
     ap = argparse.ArgumentParser(description=description,

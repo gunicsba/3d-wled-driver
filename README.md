@@ -87,9 +87,10 @@ Every effect also runs on its own: `py scripts/snow.py`, `py scripts/tree.py`, a
 
 | Effect | Script | What it does |
 |---|---|---|
-| Sweep line | `sweep.py` | A horizontal line that moves up (or down or bounces), optional rainbow colour |
+| Sweep line | `sweep.py` | A line that moves across (up, down or bouncing, at any `--angle`), optional rainbow colour |
 | Christmas tree | `tree.py` | A green tree with falling snow and twinkling coloured baubles |
 | Explosion | `boom.py` | A burning fuse along the strip, then a flash and a red shockwave ring |
+| Colliding lines | `collide.py` | Coloured comets rush in from all directions, meet in a flash and a ring of their colours, and shoot on out |
 | Laser swords | `swords.py` | Two sabers duelling: wind-up, strike, clash with sparks |
 | Pac-Man | `pacman.py` | A chomping Pac-Man, optionally running along eating dots |
 | Spinning logo | `logo.py` | Any picture, sampled at each LED and spun like a coin |
