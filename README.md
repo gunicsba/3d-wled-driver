@@ -54,7 +54,7 @@ Hang the string the way it will stay, and run MariMapper from a phone or webcam:
 
 There is an example map (a plain 10 × 20 grid) in `maps/`, which the scripts use when `maridata/` has none, so you can try everything without mapping first.
 
-For a flat map that came out mirrored (it was shot from behind), set `FLIP_X = True`; if LEDs hang loose past the lit area, set `SKIP_FIRST`. See [Settings](#settings).
+For a map that comes out mirrored (it was shot from behind), tick *Mirror left-right* in the app or set `FLIP_X = True` (it works on 3D maps too, as seen from the viewpoint); if LEDs hang loose past the lit area, set `SKIP_FIRST`. See [Settings](#settings).
 
 #### Looking at a 3D map
 

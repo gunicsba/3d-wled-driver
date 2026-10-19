@@ -774,6 +774,8 @@ class MapViewer:
         view = view_from_globals(g)
         pts = common.map_3d_to_view(self.rows, view)
         xs = np.array([p[1] for p in pts])
+        if g["flip_x"]:                                      # the same left-right mirror the effects get
+            xs = xs.min() + xs.max() - xs
         ys = np.array([p[2] for p in pts])
         depth = np.array([p[3] for p in pts])
         span = max(xs.max() - xs.min(), ys.max() - ys.min(), 1e-6)

@@ -219,18 +219,16 @@ def load_map(path, flip_v=False, skip_first=0, skip_last=0, min_y=None, max_y=No
     Reads x_cm/y_cm (y up), u/v or MariMapper 3D (x/y/z) maps. A 3D map is looked at from the viewpoint
     given in `view` (see View) and the effects then work on that flat picture, zcm is the depth. LEDs
     outside the boundaries are dropped (they stay dark) and positions are normalised over the LEDs that
-    remain. flip_x mirrors left and right of a flat map (a 3D map has the viewpoint for that).
+    remain. flip_x mirrors left and right of the picture (of a 3D map: as seen from the viewpoint).
     """
     with open(path, newline="") as f:
         rows = list(csv.DictReader(f))
     columns = set(rows[0])
-    three_d = False
     if "y_cm" in columns:
         pts = [(int(r["index"]), float(r["x_cm"]), float(r["y_cm"]), float(r.get("z_cm") or 0)) for r in rows if r["y_cm"] != ""]
     elif "v" in columns:
         pts = [(int(r["index"]), float(r["u"]), float(r["v"]), 0.0) for r in rows if r["v"] != ""]
     elif {"x", "y", "z"} <= columns:
-        three_d = True
         pts = map_3d_to_view(rows, view or View())
     else:
         raise SystemExit(f"{os.path.basename(path)}: not a map I know. Expected columns index,x_cm,y_cm or "
@@ -241,7 +239,7 @@ def load_map(path, flip_v=False, skip_first=0, skip_last=0, min_y=None, max_y=No
            and (min_y is None or p[2] >= min_y) and (max_y is None or p[2] <= max_y)]
     if not pts:
         raise SystemExit("no LEDs left inside the boundaries")
-    if flip_x and not three_d:                            # mirror x around the middle of the kept LEDs
+    if flip_x:                                            # mirror x around the middle of the kept LEDs
         mid = min(p[1] for p in pts) + max(p[1] for p in pts)
         pts = [(i, mid - x, y, z) for i, x, y, z in pts]
 
