@@ -12,7 +12,7 @@ import random
 
 import common
 
-TRUNK = (90, 40, 0)
+TRUNK = (150, 70, 0)
 STAR = (255, 200, 0)
 BAUBLE_HUES = (0.0, 0.08, 0.6, 0.83, 0.5, 0.15)  # red, orange, blue, magenta, cyan, yellow
 FLAKE_RADIUS = 7.0           # cm
@@ -67,7 +67,7 @@ def build(leds, args):
                 continue
             if i in tree:
                 g = tree[i] * (0.92 + 0.08 * math.sin(t * 1.3 + i))
-                c = (0, int(150 * g), int(18 * g))
+                c = (0, int(235 * g), int(28 * g))
             elif i in trunk:
                 c = TRUNK
             elif i in star:

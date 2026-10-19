@@ -5,7 +5,7 @@
 
 Santa bobs and sways to the beat, waves his arms alternately and kicks his legs;
 the background pulses softly in changing colours on every beat. All sizes are
-scaled from the curtain height (drawn for 200 cm).
+scaled from the picture height; with widely spaced LEDs he is drawn chunkier.
 Host, LED count, map and boundaries live in scripts/config.py.
 """
 import colorsys
@@ -16,7 +16,6 @@ from shapes import box, capsule, circle, triangle
 
 RED, WHITE, SKIN = (230, 0, 0), (255, 255, 255), (255, 150, 110)
 BLACK, GOLD, PINK = (6, 6, 6), (255, 190, 0), (255, 90, 90)
-SOFT = 5.0                       # cm: edge softness, LEDs are ~10 cm apart
 
 
 def cap(ax, ay, bx, by, r, col, m):
@@ -36,10 +35,12 @@ def tri(p0, p1, p2, col, m):
                                          min(p[1] for p in (p0, p1, p2)) - m, max(p[1] for p in (p0, p1, p2)) + m)
 
 
-def figure(t, beat, m):
+def figure(t, beat, m, k, detail):
     """Santa at time t as shapes in paint order: (distance function, its arguments, colour, bounding box).
 
-    Everything that depends on the dance is worked out here, once per frame, not once per LED.
+    Everything that depends on the dance is worked out here, once per frame, not once per LED. k makes the
+    figure chunkier (thicker limbs, bigger head and hat) when the LEDs are far apart, and detail=False leaves
+    out what a coarse grid could not show anyway (eyes, nose, buckle, stripe).
     """
     ph = 2 * math.pi * t / beat
     bob = 3 * abs(math.sin(ph / 2))                    # bounce on each beat
@@ -50,50 +51,71 @@ def figure(t, beat, m):
     # legs: one foot kicks up while the other stays down, alternating
     for side in (-1, 1):
         kick = max(0.0, math.sin(ph / 2 + (0 if side < 0 else math.pi)))
-        fx = side * (9 + 8 * kick)
+        fx = side * (9 + 8 * kick) * k
         fy = 8 + 22 * kick + bob * 0.5
-        hip = (side * 7 + sway * 0.3, 72 + bob)
-        shapes.append(cap(hip[0], hip[1], fx, fy + 12, 7, RED, m))
-        shapes.append(cap(fx - side * 4, fy, fx + side * 9, fy, 7, BLACK, m))             # boot
+        hip = (side * 7 * k + sway * 0.3, 72 + bob)
+        shapes.append(cap(hip[0], hip[1], fx, fy + 12, 7 * k, RED, m))
+        shapes.append(cap(fx - side * 4, fy, fx + side * 9 * k, fy, 7 * k, BLACK, m))     # boot
     # coat: wide body with a belly, white hem and front stripe
     sx = sway * 0.6
-    shapes.append(cap(sx * 0.5, 82 + bob, sx, 118 + bob, 17, RED, m))
-    shapes.append(rect(sx * 0.5, 74 + bob, 18, 3.5, WHITE, m))                           # hem
-    shapes.append(rect(sx * 0.8, 100 + bob, 2, 20, WHITE, m))                            # front stripe
-    shapes.append(rect(sx * 0.7, 96 + bob, 18, 4.5, BLACK, m))                           # belt
-    shapes.append(rect(sx * 0.7, 96 + bob, 5.5, 6, GOLD, m))                             # buckle
+    shapes.append(cap(sx * 0.5, 82 + bob, sx, 118 + bob, 17 * k, RED, m))
+    shapes.append(rect(sx * 0.5, 74 + bob, 18 * k, 3.5 * k, WHITE, m))                   # hem
+    if detail:
+        shapes.append(rect(sx * 0.8, 100 + bob, 2, 20, WHITE, m))                        # front stripe
+    shapes.append(rect(sx * 0.7, 96 + bob, 18 * k, 4.5 * k, BLACK, m))                   # belt
+    shapes.append(rect(sx * 0.7, 96 + bob, 5.5 * k, 6 * k, GOLD, m))                     # buckle
     # arms wave up and down, alternating
+    reach = 28 * (1 + 0.25 * (k - 1))
     for side in (-1, 1):
         a = math.radians(-10 + 120 * (0.5 + 0.5 * math.sin(ph + (0 if side > 0 else math.pi))))
         ang = a if side > 0 else math.pi - a
-        sh = (side * 15 + sx, 120 + bob)
-        hand = (sh[0] + 28 * math.cos(ang), sh[1] + 28 * math.sin(ang))
-        shapes.append(cap(sh[0], sh[1], hand[0], hand[1], 7, RED, m))
-        shapes.append(disc(hand[0], hand[1], 7.5, WHITE, m))                             # mitten
+        sh = (side * 15 * k + sx, 120 + bob)
+        hand = (sh[0] + reach * math.cos(ang), sh[1] + reach * math.sin(ang))
+        shapes.append(cap(sh[0], sh[1], hand[0], hand[1], 7 * k, RED, m))
+        shapes.append(disc(hand[0], hand[1], 7.5 * k, WHITE, m))                         # mitten
     # head, beard, hat
-    hx, hy = sway * 0.9, 148 + bob
-    shapes.append(disc(hx, hy, 11, SKIN, m))
-    shapes.append(disc(hx - 3, hy + 3, 2.2, BLACK, m))                                   # eyes
-    shapes.append(disc(hx + 3, hy + 3, 2.2, BLACK, m))
-    shapes.append(disc(hx, hy - 0.5, 3, PINK, m))                                        # nose
-    shapes.append(disc(hx, hy - 9, 12, WHITE, m))                                        # beard
-    shapes.append(disc(hx - 9, hy - 2, 4.5, WHITE, m))
-    shapes.append(disc(hx + 9, hy - 2, 4.5, WHITE, m))
-    tip = (hx + 12 + pom * 0.4, hy + 36)
-    shapes.append(tri((hx - 12, hy + 10), (hx + 12, hy + 10), tip, RED, m))
-    shapes.append(rect(hx, hy + 10.5, 13, 3.5, WHITE, m))                                # hat brim
-    shapes.append(disc(tip[0], tip[1] - 2, 6, WHITE, m))                                 # pompom
+    hx, hy = sway * 0.9, 138 + 10 * k + bob
+    shapes.append(disc(hx, hy, 11 * k, SKIN, m))
+    if detail:
+        shapes.append(disc(hx - 3, hy + 3, 2.2, BLACK, m))                               # eyes
+        shapes.append(disc(hx + 3, hy + 3, 2.2, BLACK, m))
+        shapes.append(disc(hx, hy - 0.5, 3, PINK, m))                                    # nose
+    shapes.append(disc(hx, hy - 9 * k, 12 * k, WHITE, m))                                # beard
+    shapes.append(disc(hx - 9 * k, hy - 2 * k, 4.5 * k, WHITE, m))
+    shapes.append(disc(hx + 9 * k, hy - 2 * k, 4.5 * k, WHITE, m))
+    tip = (hx + 12 * k + pom * 0.4, hy + 36 * k)
+    shapes.append(tri((hx - 12 * k, hy + 10 * k), (hx + 12 * k, hy + 10 * k), tip, RED, m))
+    shapes.append(rect(hx, hy + 10.5 * k, 13 * k, 3.5 * k, WHITE, m))                    # hat brim
+    shapes.append(disc(tip[0], tip[1] - 2, 6 * k, WHITE, m))                             # pompom
     return shapes
+
+
+def pitch_of(leds):
+    """Typical distance (cm) from an LED to its nearest neighbour that is somewhere else."""
+    import numpy as np
+
+    pts = np.array([(l.xcm, l.ycm) for l in leds])
+    if len(pts) < 2:
+        return 10.0
+    sample = pts[::max(1, len(pts) // 400)]
+    d = np.sqrt(((sample[:, None, :] - pts[None, :, :]) ** 2).sum(axis=2))
+    d[d < 1e-6] = np.inf                                  # itself, and LEDs a mirror put on the same spot
+    return float(np.median(d.min(axis=1)))
 
 
 def build(leds, args):
     xs = [l.xcm for l in leds]
     ys = [l.ycm for l in leds]
     xmin, xmax, ymin, ymax = min(xs), max(xs), min(ys), max(ys)
-    cx, S = (xmin + xmax) / 2, (ymax - ymin) / 200.0      # S: scale from the 200 cm design
+    cx = (xmin + xmax) / 2
+    pitch = pitch_of(leds)
+    coarse = pitch / ((ymax - ymin) or 1.0) * 200         # LED spacing as a part of the picture, in design units
+    k = max(1.35, min(2.0, coarse / 6))                  # sparse LEDs: a chunkier Santa, or he is a few dots
+    detail = coarse < 7
+    S = (ymax - ymin) / (144 + 50 * k)                    # scale from the design, which is this tall for this k
     beat = 60.0 / args.bpm
     bg = common.background(args)
-    soft = SOFT / S                                       # softness in design units, which is also how far a shape reaches
+    soft = 0.6 * pitch / S                                # an edge fades over about one LED, in design units
     # where the LEDs are in design units (centre x = 0, floor y = 0): they never move
     placed = [(l.i, (l.xcm - cx) / S, (l.ycm - ymin) / S) for l in leds]
 
@@ -114,11 +136,11 @@ def build(leds, args):
 
     def scene(x, y, t):
         """Colour of the picture at (x, y) in cm."""
-        return colour_at((x - cx) / S, (y - ymin) / S, background_at(t), figure(t, beat, soft))
+        return colour_at((x - cx) / S, (y - ymin) / S, background_at(t), figure(t, beat, soft, k, detail))
 
     def render(t):
         frame = common.new_frame(args)
-        base, shapes = background_at(t), figure(t, beat, soft)
+        base, shapes = background_at(t), figure(t, beat, soft, k, detail)
         for i, x, y in placed:
             if i < args.leds:
                 frame[i * 3:i * 3 + 3] = bytes(colour_at(x, y, base, shapes))
