@@ -58,7 +58,9 @@ The effects draw flat pictures, so a 3D map is first stood upright and then look
 2. **Choose where to look from.** `VIEW_AZIMUTH` (0 = front, 90 = from the right, 180 = from behind), `VIEW_ELEVATION` (90 = from above) and `VIEW_ROLL` tilt the view; `VIEW_DISTANCE` adds perspective for a viewer that many cm away.
 3. **Scale.** MariMapper measures in LED spacings, so `MARIMAPPER_UNIT_CM` says how many cm that is (your LED pitch).
 
-The app's **3D map view...** button opens a window that shows the LEDs from the current viewpoint (the colours follow the LED numbers, brighter dots are nearer), with sliders and Front / Right / Back / Left / Top presets, so you can line the map up by eye. The decks and their previews follow along. The same settings are command line flags on every script (`--view-azimuth 90`, `--map-rotate-x 90`, ...).
+The app's **3D map view...** button opens a window with the whole map in real 3D: drag with the mouse to turn it, use the wheel to zoom, and the colours follow the LED numbers (red to violet; bigger dots are nearer). Tick *Show what the effects see* for the flat picture from the viewpoint, with Front / Right / Back / Left / Top presets and sliders for the upright turn and the viewpoint. The decks and their previews follow along. The same settings are command line flags on every script (`--view-azimuth 90`, `--map-rotate-x 90`, ...).
+
+4. **Mirror (a symmetric object).** On a tractor you only need to light one half and let the other copy it. Tick *Pick mode* and click three LEDs that lie in the middle plane of the object (they must not be in a straight line), or type their numbers (`MIRROR_LEDS = (12, 340, 780)` in the settings, `--mirror-leds 12,340,780` on the command line). The map is then folded over that plane onto the side the viewpoint is on: every LED on the far side copies its twin on the near side, so both sides of the tractor show the same picture, and the viewpoint decides which side is the 'real' one (viewed from the other side the picture is its mirror image, as it physically would be). *No mirror* removes it.
 
 ### 3. Run the app
 

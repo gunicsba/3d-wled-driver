@@ -13,8 +13,23 @@ import config
 Led = namedtuple("Led", "i h x xcm ycm zcm", defaults=(0.0,))
 
 # How a 3D map is turned upright and from where it is looked at (see orient_3d and project_3d)
-View = namedtuple("View", "orient rotate_x rotate_y rotate_z azimuth elevation roll distance",
-                  defaults=("auto", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0))
+# mirror: None, or the numbers of three LEDs that lie in the middle plane of a symmetric object (see mirror_fold)
+View = namedtuple("View", "orient rotate_x rotate_y rotate_z azimuth elevation roll distance mirror",
+                  defaults=("auto", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, None))
+
+
+def parse_mirror(value):
+    """Three LED numbers as a tuple, or None. Takes "12,340,780", a list of numbers, or nothing."""
+    if not value:
+        return None
+    items = value.replace(";", ",").split(",") if isinstance(value, str) else value
+    try:
+        numbers = tuple(int(str(v).strip()) for v in items if str(v).strip() != "")
+    except ValueError:
+        raise SystemExit(f"mirror LEDs: '{value}' is not three LED numbers like 12,340,780")
+    if len(numbers) != 3:
+        raise SystemExit("mirror LEDs: give exactly three LED numbers like 12,340,780")
+    return numbers
 
 COLOURS = {"red": (230, 20, 10), "green": (0, 170, 50), "blue": (20, 80, 255),
            "orange": (255, 110, 0), "yellow": (255, 200, 0), "purple": (150, 30, 220),
@@ -96,13 +111,8 @@ def orient_3d(points, normals, index, view):
     return p @ rotation.T, (n @ rotation.T if n is not None else None)
 
 
-def project_3d(points, view):
-    """Looks at the points from the viewpoint: returns x (right), y (up) and the depth (towards the viewer).
-
-    azimuth turns the viewpoint around the map (0 = the front, 90 = from the right, 180 = from behind),
-    elevation lifts it (90 = from above), roll tilts the picture, and distance, when above 0, adds
-    perspective for a viewer that far away (cm); 0 is a flat view without perspective.
-    """
+def view_axes(view):
+    """The unit vectors of a viewpoint: towards the viewer, to the right and up in the picture."""
     import numpy as np
 
     az, el, ro = np.radians([view.azimuth, view.elevation, view.roll])
@@ -114,6 +124,53 @@ def project_3d(points, view):
     right /= np.linalg.norm(right)
     up = np.cross(right, forward)
     right, up = np.cos(ro) * right + np.sin(ro) * up, -np.sin(ro) * right + np.cos(ro) * up
+    return toward, right, up
+
+
+def mirror_plane(points, index, leds):
+    """(a point on the plane, its unit normal) through three LEDs of an oriented map."""
+    import numpy as np
+
+    where = {int(i): k for k, i in enumerate(index)}
+    missing = [n for n in leds if n not in where]
+    if missing:
+        raise SystemExit(f"mirror LEDs: LED {missing[0]} is not in the map")
+    a, b, c = (points[where[n]] for n in leds)
+    normal = np.cross(b - a, c - a)
+    length = np.linalg.norm(normal)
+    if length < 1e-6:
+        raise SystemExit("mirror LEDs: the three LEDs are in a line, pick three that do not")
+    return a, normal / length
+
+
+def mirror_fold(points, index, view):
+    """Folds an oriented map over its mirror plane onto the side the viewer is on.
+
+    The plane runs through the three LEDs in view.mirror. Every LED on the far side moves to where its twin
+    on the near side is, so both halves of a symmetric object show the same picture. Without a mirror the
+    points come back unchanged.
+    """
+    import numpy as np
+
+    if not view.mirror:
+        return points
+    a, normal = mirror_plane(points, index, view.mirror)
+    if normal @ view_axes(view)[0] < 0:                                 # the near side is the positive one
+        normal = -normal
+    d = (points - a) @ normal
+    return points - 2 * np.minimum(d, 0.0)[:, None] * normal
+
+
+def project_3d(points, view):
+    """Looks at the points from the viewpoint: returns x (right), y (up) and the depth (towards the viewer).
+
+    azimuth turns the viewpoint around the map (0 = the front, 90 = from the right, 180 = from behind),
+    elevation lifts it (90 = from above), roll tilts the picture, and distance, when above 0, adds
+    perspective for a viewer that far away (cm); 0 is a flat view without perspective.
+    """
+    import numpy as np
+
+    toward, right, up = view_axes(view)
     x, y, depth = points @ right, points @ up, points @ toward
     if view.distance > 0:
         scale = view.distance / np.maximum(view.distance - depth, 1e-3)
@@ -121,14 +178,21 @@ def project_3d(points, view):
     return x, y, depth
 
 
-def map_3d_to_view(rows, view):
-    """(index, x, y, depth) in cm of every LED of a MariMapper 3D map, as seen from the viewpoint"""
+def oriented_map(rows, view):
+    """(LED numbers, positions in cm, normals or None) of a MariMapper 3D map stood upright, before any viewpoint"""
     import numpy as np
 
     index = np.array([int(r["index"]) for r in rows])
     points = np.array([[float(r[k]) for k in "xyz"] for r in rows]) * config.MARIMAPPER_UNIT_CM
     normals = np.array([[float(r[k]) for k in ("xn", "yn", "zn")] for r in rows]) if "xn" in rows[0] else None
-    points, _ = orient_3d(points, normals, index, view)
+    points, normals = orient_3d(points, normals, index, view)
+    return index, points, normals
+
+
+def map_3d_to_view(rows, view):
+    """(index, x, y, depth) in cm of every LED of a MariMapper 3D map, as seen from the viewpoint"""
+    index, points, _ = oriented_map(rows, view)
+    points = mirror_fold(points, index, view)
     x, y, depth = project_3d(points, view)
     return [(int(i), float(a - x.min()), float(b - y.min()), float(d - depth.min())) for i, a, b, d in zip(index, x, y, depth)]
 
@@ -205,6 +269,9 @@ def parser(description):
     view.add_argument("--map-rotate-x", type=float, default=config.MAP_ROTATE_X, help="turn the map about x (degrees)")
     view.add_argument("--map-rotate-y", type=float, default=config.MAP_ROTATE_Y, help="turn the map about y (degrees)")
     view.add_argument("--map-rotate-z", type=float, default=config.MAP_ROTATE_Z, help="turn the map about z (degrees)")
+    view.add_argument("--mirror-leds", default=config.MIRROR_LEDS,
+                      help="three LED numbers in the middle plane of a symmetric object, e.g. 12,340,780: the far "
+                           "side copies the near side")
     view.add_argument("--view-azimuth", type=float, default=config.VIEW_AZIMUTH,
                       help="look from: 0 front, 90 right, 180 behind (degrees)")
     view.add_argument("--view-elevation", type=float, default=config.VIEW_ELEVATION,
@@ -220,7 +287,8 @@ def parser(description):
 
 def view_from_args(args):
     return View(args.map_orient, args.map_rotate_x, args.map_rotate_y, args.map_rotate_z,
-                args.view_azimuth, args.view_elevation, args.view_roll, args.view_distance)
+                args.view_azimuth, args.view_elevation, args.view_roll, args.view_distance,
+                parse_mirror(args.mirror_leds))
 
 
 def leds_from_args(args):
